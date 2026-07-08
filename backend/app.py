@@ -260,17 +260,24 @@ def normalize_date_text(value, fallback=''):
         return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
     return fallback
 
-def add_one_year_date(date_text):
+def add_months_date(date_text, months=12):
     base = normalize_date_text(date_text, datetime.datetime.now().strftime('%Y-%m-%d'))
     try:
         d = datetime.datetime.strptime(base, '%Y-%m-%d').date()
-        try:
-            d2 = d.replace(year=d.year + 1)
-        except ValueError:
-            d2 = d + (datetime.date(d.year + 1, 3, 1) - datetime.date(d.year, 3, 1))
-        return d2.strftime('%Y-%m-%d')
+        months = int(months or 12)
+        if months not in (6, 12, 24, 36):
+            months = 12
+        y = d.year + ((d.month - 1 + months) // 12)
+        m = ((d.month - 1 + months) % 12) + 1
+        # 대상 월의 마지막 일자보다 큰 날은 말일로 보정합니다.
+        import calendar
+        day = min(d.day, calendar.monthrange(y, m)[1])
+        return datetime.date(y, m, day).strftime('%Y-%m-%d')
     except Exception:
         return ''
+
+def add_one_year_date(date_text):
+    return add_months_date(date_text, 12)
 
 
 def clean_template_text(value):
@@ -1349,7 +1356,7 @@ class AdminReq(BaseModel): username:str; name:str='관리자'; password:str; rol
 class AdminUpdateReq(BaseModel): name:str|None=None; password:str|None=None; role:str|None=None; memo:str|None=None; is_active:int|None=None
 class MyAccountReq(BaseModel): name:str|None=None; phone:str|None=None; memo:str|None=None; current_password:str|None=None; new_password:str|None=None
 class PasswordReq(BaseModel): password:str
-class MemberReq(BaseModel): name:str; phone:str=''; grade:str='일반'; memo:str=''; status:str='활성'; priority:str='보통'; source:str='직접등록'; preferred_count:int=10; created_by:int|None=None; created_at:str|None=None; contract_end_at:str|None=None
+class MemberReq(BaseModel): name:str; phone:str=''; grade:str='일반'; memo:str=''; status:str='활성'; priority:str='보통'; source:str='직접등록'; preferred_count:int=10; created_by:int|None=None; created_at:str|None=None; contract_months:int|None=12; contract_end_at:str|None=None
 class MemberStatusReq(BaseModel): status:str; memo:str|None=None
 class MemberMemoReq(BaseModel): memo:str=''
 class MemberNoteReq(BaseModel): note:str; note_type:str='상담'
@@ -2514,7 +2521,10 @@ def bulk_member_status(req:MemberBulkStatusReq, request:Request, authorization: 
 def add_member(req:MemberReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     created_at = normalize_date_text(req.created_at, datetime.datetime.now().strftime('%Y-%m-%d')) if is_super_admin(admin) else datetime.datetime.now().strftime('%Y-%m-%d')
-    contract_end_at = normalize_date_text(req.contract_end_at, '') or add_one_year_date(created_at)
+    contract_months = int(req.contract_months or 12)
+    if contract_months not in (6, 12, 24, 36):
+        contract_months = 12
+    contract_end_at = add_months_date(created_at, contract_months)
     owner_id = int(req.created_by or admin['id']) if is_super_admin(admin) else int(admin['id'])
     with con() as c:
         if owner_id:
@@ -2553,7 +2563,11 @@ def update_member(member_id:int, req:MemberReq, request:Request, authorization: 
             if req.created_at is not None:
                 fields.append('created_at=?'); vals.append(normalize_date_text(req.created_at, now()))
             if req.contract_end_at is not None:
-                fields.append('contract_end_at=?'); vals.append(normalize_date_text(req.contract_end_at, ''))
+                contract_months = int(req.contract_months or 12)
+                if contract_months not in (6, 12, 24, 36):
+                    contract_months = 12
+                base_created = normalize_date_text(req.created_at, '') or c.execute('SELECT created_at FROM members WHERE id=?', (member_id,)).fetchone()['created_at']
+                fields.append('contract_end_at=?'); vals.append(add_months_date(base_created, contract_months))
         vals.append(member_id)
         c.execute('UPDATE members SET '+', '.join(fields)+' WHERE id=?', vals)
         c.commit()

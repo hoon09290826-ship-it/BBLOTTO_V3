@@ -196,12 +196,35 @@ function toDateInputValue(value){
   const m=s.match(/^(\d{4}-\d{2}-\d{2})/);
   return m ? m[1] : '';
 }
-function oneYearAfter(value){
+function addMonthsDate(value, months){
   const base=toDateInputValue(value) || new Date().toISOString().slice(0,10);
   const d=new Date(base+'T00:00:00');
   if(Number.isNaN(d.getTime())) return '';
-  d.setFullYear(d.getFullYear()+1);
+  const day=d.getDate();
+  d.setMonth(d.getMonth()+Number(months||12));
+  // 말일 보정: 1/31 + 1개월 같은 경우 다음달로 밀리면 해당 월 마지막 날로 맞춥니다.
+  if(d.getDate() !== day) d.setDate(0);
   return d.toISOString().slice(0,10);
+}
+function oneYearAfter(value){ return addMonthsDate(value, 12); }
+function getContractPeriodMonths(){
+  const v=Number($('mContractPeriod')?.value || 12);
+  return [6,12,24,36].includes(v) ? v : 12;
+}
+function calcContractEnd(){
+  const start=toDateInputValue($('mCreatedAt')?.value) || new Date().toISOString().slice(0,10);
+  setValue('mContractEndAt', addMonthsDate(start, getContractPeriodMonths()));
+}
+function guessContractPeriodMonths(start, end){
+  const a=toDateInputValue(start), b=toDateInputValue(end);
+  if(!a || !b) return 12;
+  const da=new Date(a+'T00:00:00'), db=new Date(b+'T00:00:00');
+  if(Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return 12;
+  const days=Math.round((db-da)/86400000);
+  if(days <= 220) return 6;
+  if(days <= 550) return 12;
+  if(days <= 920) return 24;
+  return 36;
 }
 function isRepresentativeAdmin(){
   if(!currentAdmin) return false;
@@ -221,7 +244,9 @@ function refreshMemberAdminSelect(selectedValue){
   if(current && Array.from(sel.options).some(o=>String(o.value)===current)) sel.value=current;
   const editable=isRepresentativeAdmin();
   sel.disabled=!editable;
-  ['mCreatedAt','mContractEndAt'].forEach(id=>{ const el=$(id); if(el) el.disabled=!editable; });
+  const created=$('mCreatedAt'); if(created) created.disabled=!editable;
+  const period=$('mContractPeriod'); if(period) period.disabled=!editable;
+  const end=$('mContractEndAt'); if(end){ end.disabled=false; end.readOnly=true; }
 }
 
 function setGenCountValue(count){
@@ -1189,7 +1214,7 @@ async function loadAdmin(){
 
 window.selectMember=function(id){
   const m=membersCache.find(x=>String(x.id)===String(id)); if(!m) return;
-  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mCreatedAt',toDateInputValue(m.created_at)); setValue('mContractEndAt',toDateInputValue(m.contract_end_at)||oneYearAfter(m.created_at)); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||''); refreshMemberAdminSelect(m.created_by||'');
+  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mCreatedAt',toDateInputValue(m.created_at)); setValue('mContractPeriod', String(guessContractPeriodMonths(m.created_at, m.contract_end_at))); setValue('mContractEndAt',toDateInputValue(m.contract_end_at)||addMonthsDate(m.created_at, getContractPeriodMonths())); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||''); refreshMemberAdminSelect(m.created_by||'');
   if($('genMember')) $('genMember').value=id;
   setGenCountValue(getMemberPreferredCount(m));
   refreshSmsPreview();
@@ -1412,11 +1437,12 @@ async function saveMember(){
 }
 async function addMember(){
   const id=$('mId')?.value;
-  const body={name:$('mName')?.value||'', phone:$('mPhone')?.value||'', grade:memberGradeLabel($('mGrade')?.value||'일반'), status:$('mStatus')?.value||'활성', priority:$('mPriority')?.value||'보통', preferred_count:getMemberPreferredCount({preferred_count:$('mPreferredCount')?.value||10}), created_by:Number($('mCreatedBy')?.value||0)||null, created_at:$('mCreatedAt')?.value||'', contract_end_at:$('mContractEndAt')?.value||'', source:$('mSource')?.value||'직접등록', memo:$('mMemo')?.value||''};
+  calcContractEnd();
+  const body={name:$('mName')?.value||'', phone:$('mPhone')?.value||'', grade:memberGradeLabel($('mGrade')?.value||'일반'), status:$('mStatus')?.value||'활성', priority:$('mPriority')?.value||'보통', preferred_count:getMemberPreferredCount({preferred_count:$('mPreferredCount')?.value||10}), created_by:Number($('mCreatedBy')?.value||0)||null, created_at:$('mCreatedAt')?.value||'', contract_months:getContractPeriodMonths(), contract_end_at:$('mContractEndAt')?.value||'', source:$('mSource')?.value||'직접등록', memo:$('mMemo')?.value||''};
   if(!body.name.trim()){ alert('회원 이름을 입력하세요.'); return; }
   if(id) await api('/api/members/'+id,{method:'PUT',body}); else await api('/api/members',{method:'POST',body});
   ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,''));
-  setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractEndAt','');
+  setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractPeriod','12'); setValue('mContractEndAt','');
   setValue('mGrade','일반'); setValue('mStatus','활성'); setValue('mPriority','보통'); setValue('mPreferredCount','10'); setValue('mSource',''); refreshMemberAdminSelect();
   await loadMembers(); await loadDashboard(); toast('회원 정보가 저장되었습니다.');
 }
@@ -2056,8 +2082,9 @@ function bind(){
   $('generate')?.addEventListener('click',safe(generate));
   $('addMember')?.addEventListener('click',safe(addMember));
   $('saveMemberBtn')?.addEventListener('click',safe(saveMember));
-  $('clearMember')?.addEventListener('click',()=>{ ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,'')); setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractEndAt',''); setValue('mPreferredCount','10'); refreshMemberAdminSelect(); });
-  $('mCreatedAt')?.addEventListener('change',()=>{ if(!$('mContractEndAt')?.value) setValue('mContractEndAt', oneYearAfter($('mCreatedAt')?.value)); });
+  $('clearMember')?.addEventListener('click',()=>{ ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,'')); setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractPeriod','12'); setValue('mContractEndAt',''); setValue('mPreferredCount','10'); refreshMemberAdminSelect(); });
+  $('mCreatedAt')?.addEventListener('change', calcContractEnd);
+  $('mContractPeriod')?.addEventListener('change', calcContractEnd);
   $('memberDetailBack')?.addEventListener('click',()=>openPanel('members','회원 관리'));
   $('memberSearch')?.addEventListener('input',()=>scheduleMemberRefresh());
   $('memberSearch')?.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); clearTimeout(memberSearchTimer); saveMemberFilterState(); refreshMemberView(); } });
