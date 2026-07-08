@@ -722,7 +722,7 @@ def is_super_admin(admin: dict|sqlite3.Row|None):
         username = str(admin['username'] if 'username' in keys else '').strip().lower()
         role = str(admin['role'] if 'role' in keys else '').replace(' ', '').lower()
         name = str(admin['name'] if 'name' in keys else '').replace(' ', '').lower()
-    return (username == 'admin' or '최고관리자' in role or '대표관리자' in role or 'super' in role or 'owner' in role or '최고관리자' in name or '대표관리자' in name)
+    return (username == 'admin' or '최고관리자' in role or '대표관리자' in role or role in {'대표','최고'} or 'super' in role or 'owner' in role or '최고관리자' in name or '대표관리자' in name or name in {'대표','최고'})
 
 def require_super_admin(admin):
     if not is_super_admin(admin):

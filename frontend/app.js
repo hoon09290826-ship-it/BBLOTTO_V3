@@ -203,13 +203,23 @@ function oneYearAfter(value){
   d.setFullYear(d.getFullYear()+1);
   return d.toISOString().slice(0,10);
 }
-function refreshMemberAdminSelect(){
+function isRepresentativeAdmin(){
+  if(!currentAdmin) return false;
+  if(currentAdmin.is_super_admin) return true;
+  const txt=[currentAdmin.role,currentAdmin.name,currentAdmin.username]
+    .map(v=>String(v||'').replace(/\s+/g,'').toLowerCase()).join(' ');
+  return txt.includes('대표관리자') || txt.includes('최고관리자') || txt.includes('super') || txt.includes('owner') || String(currentAdmin.username||'').toLowerCase()==='admin';
+}
+function refreshMemberAdminSelect(selectedValue){
   const sel=$('mCreatedBy'); if(!sel) return;
-  const current=String(sel.value||'');
-  const admins=Array.isArray(adminCache)?adminCache:[];
+  const current=String((selectedValue ?? sel.value) || '');
+  let admins=Array.isArray(adminCache)?adminCache.slice():[];
+  if(currentAdmin && !admins.some(a=>String(a.id)===String(currentAdmin.id))){
+    admins.unshift(currentAdmin);
+  }
   sel.innerHTML='<option value="">현재 로그인 관리자</option>'+admins.map(a=>`<option value="${a.id}">${esc(a.name||a.username||'관리자')} (${esc(a.username||'')})</option>`).join('');
   if(current && Array.from(sel.options).some(o=>String(o.value)===current)) sel.value=current;
-  const editable=!!currentAdmin?.is_super_admin;
+  const editable=isRepresentativeAdmin();
   sel.disabled=!editable;
   ['mCreatedAt','mContractEndAt'].forEach(id=>{ const el=$(id); if(el) el.disabled=!editable; });
 }
@@ -1179,7 +1189,7 @@ async function loadAdmin(){
 
 window.selectMember=function(id){
   const m=membersCache.find(x=>String(x.id)===String(id)); if(!m) return;
-  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mCreatedBy',m.created_by||''); setValue('mCreatedAt',toDateInputValue(m.created_at)); setValue('mContractEndAt',toDateInputValue(m.contract_end_at)||oneYearAfter(m.created_at)); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||''); refreshMemberAdminSelect();
+  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mCreatedAt',toDateInputValue(m.created_at)); setValue('mContractEndAt',toDateInputValue(m.contract_end_at)||oneYearAfter(m.created_at)); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||''); refreshMemberAdminSelect(m.created_by||'');
   if($('genMember')) $('genMember').value=id;
   setGenCountValue(getMemberPreferredCount(m));
   refreshSmsPreview();
