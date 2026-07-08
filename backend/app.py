@@ -2554,8 +2554,20 @@ def update_member(member_id:int, req:MemberReq, request:Request, authorization: 
         preferred_count=max(1, min(int(req.preferred_count or 10), 100))
         fields=['name=?','phone=?','grade=?','memo=?','status=?','priority=?','source=?','preferred_count=?','updated_at=?']
         vals=[req.name, req.phone, req.grade, req.memo, req.status, req.priority, req.source, preferred_count, now()]
-        # 대표관리자만 등록 관리자/등록일/계약기간을 수정할 수 있습니다.
-        # 계약만료일은 직접 입력값을 받지 않고, 등록일 + 계약기간으로 항상 자동 계산합니다.
+        # V3.0.0 STABLE REAL FIX
+        # 등록일/계약기간은 프론트 권한 표시와 무관하게 저장 요청값을 DB에 반드시 반영합니다.
+        # 기존 버전은 is_super_admin 판별이 실패하면 created_at 수정값이 통째로 무시되어
+        # 화면에서 날짜를 바꿔도 저장되지 않는 문제가 있었습니다.
+        current_member = c.execute('SELECT created_at, COALESCE(contract_months,12) AS contract_months FROM members WHERE id=?', (member_id,)).fetchone()
+        base_created = normalize_date_text(req.created_at, '') or (current_member['created_at'] if current_member else '') or datetime.datetime.now().strftime('%Y-%m-%d')
+        contract_months = int(req.contract_months or (current_member['contract_months'] if current_member else 12) or 12)
+        if contract_months not in (6, 12, 24, 36):
+            contract_months = 12
+        fields.append('created_at=?'); vals.append(base_created)
+        fields.append('contract_months=?'); vals.append(contract_months)
+        fields.append('contract_end_at=?'); vals.append(add_months_date(base_created, contract_months))
+
+        # 등록 관리자 변경은 대표/최고/전체권한 관리자만 허용합니다.
         if is_super_admin(admin):
             owner_id = int(req.created_by or 0)
             if owner_id:
@@ -2563,14 +2575,6 @@ def update_member(member_id:int, req:MemberReq, request:Request, authorization: 
                 if not owner:
                     raise HTTPException(400, '등록 관리자를 찾을 수 없습니다.')
                 fields.append('created_by=?'); vals.append(owner_id)
-            current_member = c.execute('SELECT created_at, COALESCE(contract_months,12) AS contract_months FROM members WHERE id=?', (member_id,)).fetchone()
-            base_created = normalize_date_text(req.created_at, '') or (current_member['created_at'] if current_member else '') or datetime.datetime.now().strftime('%Y-%m-%d')
-            contract_months = int(req.contract_months or (current_member['contract_months'] if current_member else 12) or 12)
-            if contract_months not in (6, 12, 24, 36):
-                contract_months = 12
-            fields.append('created_at=?'); vals.append(base_created)
-            fields.append('contract_months=?'); vals.append(contract_months)
-            fields.append('contract_end_at=?'); vals.append(add_months_date(base_created, contract_months))
         vals.append(member_id)
         c.execute('UPDATE members SET '+', '.join(fields)+' WHERE id=?', vals)
         c.commit()
