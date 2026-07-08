@@ -243,10 +243,10 @@ function refreshMemberAdminSelect(selectedValue){
   }
   sel.innerHTML='<option value="">현재 로그인 관리자</option>'+admins.map(a=>`<option value="${a.id}">${esc(a.name||a.username||'관리자')} (${esc(a.username||'')})</option>`).join('');
   if(current && Array.from(sel.options).some(o=>String(o.value)===current)) sel.value=current;
-  const canChangeOwner=isRepresentativeAdmin();
-  // 등록 관리자 변경만 대표관리자 권한으로 제한합니다.
-  sel.disabled=!canChangeOwner;
-  // 등록일/계약기간은 모든 관리자가 수정 가능합니다.
+  // 등록 관리자 변경만 대표관리자 권한입니다.
+  // 등록일/계약기간은 모든 관리자가 수정할 수 있도록 잠그지 않습니다.
+  const editable=isRepresentativeAdmin();
+  sel.disabled=!editable;
   const created=$('mCreatedAt'); if(created) created.disabled=false;
   const period=$('mContractPeriod'); if(period) period.disabled=false;
   const end=$('mContractEndAt'); if(end){ end.disabled=false; end.readOnly=true; }
@@ -1443,11 +1443,19 @@ async function addMember(){
   calcContractEnd();
   const body={name:$('mName')?.value||'', phone:$('mPhone')?.value||'', grade:memberGradeLabel($('mGrade')?.value||'일반'), status:$('mStatus')?.value||'활성', priority:$('mPriority')?.value||'보통', preferred_count:getMemberPreferredCount({preferred_count:$('mPreferredCount')?.value||10}), created_by:Number($('mCreatedBy')?.value||0)||null, created_at:$('mCreatedAt')?.value||'', contract_months:getContractPeriodMonths(), contract_end_at:$('mContractEndAt')?.value||'', source:$('mSource')?.value||'직접등록', memo:$('mMemo')?.value||''};
   if(!body.name.trim()){ alert('회원 이름을 입력하세요.'); return; }
-  if(id) await api('/api/members/'+id,{method:'PUT',body}); else await api('/api/members',{method:'POST',body});
-  ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,''));
-  setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractPeriod','12'); setValue('mContractEndAt','');
-  setValue('mGrade','일반'); setValue('mStatus','활성'); setValue('mPriority','보통'); setValue('mPreferredCount','10'); setValue('mSource',''); refreshMemberAdminSelect();
-  await loadMembers(); await loadDashboard(); toast('회원 정보가 저장되었습니다.');
+  let savedResult;
+  if(id) savedResult = await api('/api/members/'+id,{method:'PUT',body}); else savedResult = await api('/api/members',{method:'POST',body});
+  const savedId = id || savedResult?.id || savedResult?.member?.id;
+  await loadMembers();
+  if(savedId){
+    const saved = membersCache.find(x=>String(x.id)===String(savedId));
+    if(saved) selectMember(saved.id);
+  }else{
+    ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,''));
+    setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractPeriod','12'); setValue('mContractEndAt','');
+    setValue('mGrade','일반'); setValue('mStatus','활성'); setValue('mPriority','보통'); setValue('mPreferredCount','10'); setValue('mSource',''); refreshMemberAdminSelect();
+  }
+  await loadDashboard(); toast('회원 정보가 저장되었습니다.');
 }
 function autoTemplate(){
   setValue('template', getDefaultTemplate());

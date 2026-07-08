@@ -2522,9 +2522,7 @@ def bulk_member_status(req:MemberBulkStatusReq, request:Request, authorization: 
 @app.post('/api/members')
 def add_member(req:MemberReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
-    # V3.0.0 STABLE: 등록일/계약기간은 모든 관리자가 수정 가능,
-    # 등록 관리자 변경(created_by)만 대표관리자 권한으로 제한합니다.
-    created_at = normalize_date_text(req.created_at, datetime.datetime.now().strftime('%Y-%m-%d'))
+    created_at = normalize_date_text(req.created_at, datetime.datetime.now().strftime('%Y-%m-%d')) if is_super_admin(admin) else datetime.datetime.now().strftime('%Y-%m-%d')
     contract_months = int(req.contract_months or 12)
     if contract_months not in (6, 12, 24, 36):
         contract_months = 12
@@ -2554,18 +2552,29 @@ def update_member(member_id:int, req:MemberReq, request:Request, authorization: 
     with con() as c:
         assert_member_access(c, admin, member_id)
         preferred_count=max(1, min(int(req.preferred_count or 10), 100))
-        fields=['name=?','phone=?','grade=?','memo=?','status=?','priority=?','source=?','preferred_count=?','updated_at=?']
-        vals=[req.name, req.phone, req.grade, req.memo, req.status, req.priority, req.source, preferred_count, now()]
-        # V3.0.0 STABLE: 등록일/계약기간은 모든 관리자가 수정 가능하게 합니다.
-        # 등록 관리자 변경(created_by)만 대표관리자 권한으로 제한합니다.
-        current_member = c.execute('SELECT created_at, COALESCE(contract_months,12) AS contract_months FROM members WHERE id=?', (member_id,)).fetchone()
-        base_created = normalize_date_text(req.created_at, '') or (current_member['created_at'] if current_member else '') or datetime.datetime.now().strftime('%Y-%m-%d')
-        contract_months = int(req.contract_months or (current_member['contract_months'] if current_member else 12) or 12)
+        current_member = c.execute('SELECT created_at, COALESCE(contract_months,12) AS contract_months, created_by FROM members WHERE id=?', (member_id,)).fetchone()
+        if not current_member:
+            raise HTTPException(404, '회원 정보를 찾을 수 없습니다.')
+
+        # V3.0.0 STABLE 실제 수정:
+        # - 등록일(created_at), 계약기간(contract_months)은 모든 관리자가 수정 가능
+        # - 등록 관리자(created_by) 변경만 대표관리자만 가능
+        # - 계약만료일(contract_end_at)은 등록일 + 계약기간으로 서버에서 항상 재계산
+        base_created = normalize_date_text(req.created_at, '') or normalize_date_text(current_member['created_at'], datetime.datetime.now().strftime('%Y-%m-%d'))
+        contract_months = int(req.contract_months or current_member['contract_months'] or 12)
         if contract_months not in (6, 12, 24, 36):
             contract_months = 12
-        fields.append('created_at=?'); vals.append(base_created)
-        fields.append('contract_months=?'); vals.append(contract_months)
-        fields.append('contract_end_at=?'); vals.append(add_months_date(base_created, contract_months))
+        contract_end_at = add_months_date(base_created, contract_months)
+
+        fields=[
+            'name=?','phone=?','grade=?','memo=?','status=?','priority=?','source=?',
+            'preferred_count=?','created_at=?','contract_months=?','contract_end_at=?','updated_at=?'
+        ]
+        vals=[
+            req.name, req.phone, req.grade, req.memo, req.status, req.priority, req.source,
+            preferred_count, base_created, contract_months, contract_end_at, now()
+        ]
+
         if is_super_admin(admin):
             owner_id = int(req.created_by or 0)
             if owner_id:
@@ -2573,11 +2582,14 @@ def update_member(member_id:int, req:MemberReq, request:Request, authorization: 
                 if not owner:
                     raise HTTPException(400, '등록 관리자를 찾을 수 없습니다.')
                 fields.append('created_by=?'); vals.append(owner_id)
+
         vals.append(member_id)
         c.execute('UPDATE members SET '+', '.join(fields)+' WHERE id=?', vals)
         c.commit()
+
+        saved = c.execute('SELECT id,created_at,contract_months,contract_end_at,created_by FROM members WHERE id=?', (member_id,)).fetchone()
     log_action(admin,'UPDATE_MEMBER',f'회원 수정 ID {member_id}: {req.name}',request)
-    return {'ok':True}
+    return {'ok':True, 'member': dict(saved) if saved else {'id': member_id}}
 
 @app.get('/api/members/{member_id}/detail')
 def member_detail(member_id:int, authorization: str|None = Header(default=None)):
