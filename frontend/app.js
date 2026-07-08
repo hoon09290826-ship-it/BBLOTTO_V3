@@ -245,10 +245,8 @@ function refreshMemberAdminSelect(selectedValue){
   if(current && Array.from(sel.options).some(o=>String(o.value)===current)) sel.value=current;
   const editable=isRepresentativeAdmin();
   sel.disabled=!editable;
-  // V3.0.0 STABLE REAL FIX: 등록일/계약기간은 저장 오류를 막기 위해 항상 수정 가능하게 둡니다.
-  // 등록 관리자 변경만 대표관리자 권한으로 제한합니다.
-  const created=$('mCreatedAt'); if(created) created.disabled=false;
-  const period=$('mContractPeriod'); if(period) period.disabled=false;
+  const created=$('mCreatedAt'); if(created) created.disabled=!editable;
+  const period=$('mContractPeriod'); if(period) period.disabled=!editable;
   const end=$('mContractEndAt'); if(end){ end.disabled=false; end.readOnly=true; }
 }
 
@@ -1441,20 +1439,40 @@ async function saveMember(){
 async function addMember(){
   const id=$('mId')?.value;
   calcContractEnd();
-  const body={name:$('mName')?.value||'', phone:$('mPhone')?.value||'', grade:memberGradeLabel($('mGrade')?.value||'일반'), status:$('mStatus')?.value||'활성', priority:$('mPriority')?.value||'보통', preferred_count:getMemberPreferredCount({preferred_count:$('mPreferredCount')?.value||10}), created_by:Number($('mCreatedBy')?.value||0)||null, created_at:$('mCreatedAt')?.value||'', contract_months:getContractPeriodMonths(), contract_end_at:$('mContractEndAt')?.value||'', source:$('mSource')?.value||'직접등록', memo:$('mMemo')?.value||''};
+  const body={
+    name:$('mName')?.value||'',
+    phone:$('mPhone')?.value||'',
+    grade:memberGradeLabel($('mGrade')?.value||'일반'),
+    status:$('mStatus')?.value||'활성',
+    priority:$('mPriority')?.value||'보통',
+    preferred_count:getMemberPreferredCount({preferred_count:$('mPreferredCount')?.value||10}),
+    created_by:Number($('mCreatedBy')?.value||0)||null,
+    created_at:toDateInputValue($('mCreatedAt')?.value)||'',
+    contract_months:getContractPeriodMonths(),
+    source:$('mSource')?.value||'직접등록',
+    memo:$('mMemo')?.value||''
+  };
   if(!body.name.trim()){ alert('회원 이름을 입력하세요.'); return; }
-  const result = id ? await api('/api/members/'+id,{method:'PUT',body}) : await api('/api/members',{method:'POST',body});
-  const keepId = id || result.id;
+
+  const result = id
+    ? await api('/api/members/'+id,{method:'PUT',body})
+    : await api('/api/members',{method:'POST',body});
+
+  const savedId = Number(id || result.id || result.member?.id || 0);
   await loadMembers();
-  if(keepId){
-    const saved = membersCache.find(m=>String(m.id)===String(keepId));
-    if(saved) selectMember(saved.id);
+  await loadDashboard();
+
+  // 수정 저장 후 폼을 비우지 않고, 서버에서 다시 읽은 최신 회원값으로 재선택합니다.
+  // 등록일이 실제 저장됐는지 화면에서 바로 확인할 수 있습니다.
+  if(savedId){
+    const saved = membersCache.find(m=>Number(m.id)===savedId);
+    if(saved) window.selectMember(savedId);
   }else{
     ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,''));
     setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractPeriod','12'); setValue('mContractEndAt','');
     setValue('mGrade','일반'); setValue('mStatus','활성'); setValue('mPriority','보통'); setValue('mPreferredCount','10'); setValue('mSource',''); refreshMemberAdminSelect();
   }
-  await loadDashboard(); toast('회원 정보가 저장되었습니다.');
+  toast('회원 정보가 저장되었습니다.');
 }
 function autoTemplate(){
   setValue('template', getDefaultTemplate());
