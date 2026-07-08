@@ -228,10 +228,11 @@ function guessContractPeriodMonths(start, end){
 }
 function isRepresentativeAdmin(){
   if(!currentAdmin) return false;
-  if(currentAdmin.is_super_admin) return true;
+  const superFlag = currentAdmin.is_super_admin === true || currentAdmin.is_super_admin === 1 || String(currentAdmin.is_super_admin).toLowerCase() === 'true';
+  if(superFlag) return true;
   const txt=[currentAdmin.role,currentAdmin.name,currentAdmin.username]
     .map(v=>String(v||'').replace(/\s+/g,'').toLowerCase()).join(' ');
-  return txt.includes('대표관리자') || txt.includes('최고관리자') || txt.includes('super') || txt.includes('owner') || String(currentAdmin.username||'').toLowerCase()==='admin';
+  return txt.includes('대표관리자') || txt.includes('대표') || txt.includes('최고관리자') || txt.includes('최고') || txt.includes('전체권한') || txt.includes('super') || txt.includes('owner') || String(currentAdmin.username||'').toLowerCase()==='admin';
 }
 function refreshMemberAdminSelect(selectedValue){
   const sel=$('mCreatedBy'); if(!sel) return;
@@ -1214,7 +1215,7 @@ async function loadAdmin(){
 
 window.selectMember=function(id){
   const m=membersCache.find(x=>String(x.id)===String(id)); if(!m) return;
-  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mCreatedAt',toDateInputValue(m.created_at)); setValue('mContractPeriod', String(guessContractPeriodMonths(m.created_at, m.contract_end_at))); setValue('mContractEndAt',toDateInputValue(m.contract_end_at)||addMonthsDate(m.created_at, getContractPeriodMonths())); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||''); refreshMemberAdminSelect(m.created_by||'');
+  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mCreatedAt',toDateInputValue(m.created_at)); setValue('mContractPeriod', String(m.contract_months || guessContractPeriodMonths(m.created_at, m.contract_end_at))); setValue('mContractEndAt',toDateInputValue(m.contract_end_at)||addMonthsDate(m.created_at, getContractPeriodMonths())); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||''); refreshMemberAdminSelect(m.created_by||''); calcContractEnd();
   if($('genMember')) $('genMember').value=id;
   setGenCountValue(getMemberPreferredCount(m));
   refreshSmsPreview();
