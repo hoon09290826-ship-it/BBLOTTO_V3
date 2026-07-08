@@ -1782,6 +1782,41 @@ window.bbDownloadSmsCsvScoped = bbDownloadSmsCsvScoped;
 window.bbCopySmsBulk = bbCopySmsBulk;
 window.bbApplyBulkTemplate = bbApplyBulkTemplate;
 
+
+let lastSearchedDraw = null;
+function renderDrawSearchResult(d){
+  const box=$('drawSearchResult'); if(!box) return;
+  if(!d){ box.innerHTML='조회 결과가 없습니다.'; return; }
+  const nums=(d.numbers||[]).map(n=>`<span class="ball ${ballClass(n)}">${n}</span>`).join('');
+  if(d.ok){
+    box.innerHTML=`<div class="draw-search-result"><b>${d.round_no}회</b> <small>${d.draw_date||''}</small><div class="nums-line">${nums}<span class="bonus-ball">보너스 ${d.bonus||''}</span></div><p>${esc(d.message||'조회 완료')}</p></div>`;
+  }else{
+    box.innerHTML=`<div class="draw-search-result warn"><b>${d.round_no||'-'}회</b> <small>${d.draw_date||''}</small><p>${esc(d.message||'조회 실패')}</p></div>`;
+  }
+}
+async function searchDrawByRound(){
+  const r=Number($('drawSearchRound')?.value||0);
+  if(!r){ alert('조회할 회차를 입력하세요.'); return; }
+  setBusy('searchDraw', true, '조회 중...');
+  try{
+    const d=await api('/api/draws/search?round_no='+encodeURIComponent(r));
+    lastSearchedDraw=d && d.ok ? d : null;
+    renderDrawSearchResult(d);
+    if(d && d.ok){ await Promise.allSettled([loadDraws(), loadStats(100), loadDashboard()]); }
+  }catch(e){
+    lastSearchedDraw=null;
+    renderDrawSearchResult({ok:false, round_no:r, message:e?.message || '회차 조회에 실패했습니다.'});
+  }finally{ setBusy('searchDraw', false); }
+}
+function applySearchedDrawToCheck(){
+  if(!lastSearchedDraw || !lastSearchedDraw.numbers?.length){ alert('먼저 회차 조회를 완료하세요.'); return; }
+  if($('checkRound')) $('checkRound').value=lastSearchedDraw.round_no;
+  if($('winningNums')) $('winningNums').value=(lastSearchedDraw.numbers||[]).join(' ');
+  if($('bonusNum')) $('bonusNum').value=lastSearchedDraw.bonus||'';
+  setText('autoRoundInfo', `${lastSearchedDraw.round_no}회 당첨번호를 당첨확인 입력칸에 적용했습니다.`);
+  toast('조회한 당첨번호를 적용했습니다.');
+}
+
 async function checkWinning(){
   // PHASE20: 회차/당첨번호 확인을 백엔드 자동화에 맡깁니다.
   // 번호가 비어 있으면 해당 회차 공식 번호를 자동 조회하고, 아직 공개 전이면 안내 메시지를 받습니다.
@@ -2025,6 +2060,9 @@ function bind(){
   }
   $('checkWinning')?.addEventListener('click',safe(checkWinning));
   $('saveDraw')?.addEventListener('click',safe(saveDraw));
+  $('searchDraw')?.addEventListener('click',safe(searchDrawByRound));
+  $('drawSearchRound')?.addEventListener('keydown',e=>{ if(e.key==='Enter') searchDrawByRound(); });
+  $('applySearchedDraw')?.addEventListener('click',safe(applySearchedDrawToCheck));
   $('addAdmin')?.addEventListener('click',safe(addAdmin));
   $('openAdminModal')?.addEventListener('click',openAdminCreateModal);
   $('closeAdminModal')?.addEventListener('click',closeAdminCreateModal);

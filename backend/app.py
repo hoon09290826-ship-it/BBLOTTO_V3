@@ -2854,6 +2854,48 @@ def draws(limit:int=100, authorization: str|None = Header(default=None)):
     with con() as c: rows=c.execute('SELECT * FROM draws ORDER BY round_no DESC LIMIT ?', (limit,)).fetchall()
     return [{'round_no':r['round_no'],'draw_date':r['draw_date'],'numbers':parse_nums(r['numbers']),'bonus':r['bonus']} for r in rows]
 
+
+
+@app.get('/api/draws/search')
+def search_draw(round_no:int, authorization: str|None = Header(default=None)):
+    """V3.0.0 STABLE: 1회차부터 추첨 완료 최신 회차까지 회차별 당첨번호 조회.
+    DB에 없으면 동행복권 공개 조회를 시도하고, 성공 시 DB에 저장합니다.
+    """
+    require_admin(authorization)
+    try:
+        r = int(round_no or 0)
+    except Exception:
+        raise HTTPException(400, '회차는 숫자로 입력하세요.')
+    expected, completed = _rc315_expected_round_and_completed()
+    if r < 1:
+        raise HTTPException(400, '1회차 이상만 조회할 수 있습니다.')
+    if r > completed:
+        return {
+            'ok': False, 'round_no': r, 'expected_round': expected, 'completed_round': completed,
+            'status': 'future', 'draw_date': draw_date_for_round(r), 'numbers': [], 'bonus': 0,
+            'message': f'{r}회는 아직 추첨 완료 전입니다. 현재 조회 가능한 최신 완료 회차는 {completed}회입니다.'
+        }
+    draw = get_draw(r)
+    source = 'db'
+    if not draw:
+        fetched = fetch_official_lotto(r)
+        if fetched:
+            saved = save_draw_if_missing(fetched)
+            draw = saved or fetched
+            source = draw.get('source', 'official')
+    if draw and len(draw.get('numbers') or []) == 6:
+        return {
+            'ok': True, 'round_no': r, 'expected_round': expected, 'completed_round': completed,
+            'status': 'saved', 'draw_date': draw.get('draw_date') or draw_date_for_round(r),
+            'numbers': parse_nums(draw.get('numbers')), 'bonus': int(draw.get('bonus') or 0),
+            'source': source, 'message': f'{r}회 당첨번호를 조회했습니다.'
+        }
+    return {
+        'ok': False, 'round_no': r, 'expected_round': expected, 'completed_round': completed,
+        'status': 'missing', 'draw_date': draw_date_for_round(r), 'numbers': [], 'bonus': 0,
+        'message': f'{r}회 당첨번호가 DB에 없고 자동 조회도 실패했습니다. 인터넷 연결 또는 동행복권 조회 차단 여부를 확인하세요.'
+    }
+
 @app.get('/api/draws/next')
 def next_draw_round(authorization: str|None = Header(default=None)):
     require_admin(authorization)
