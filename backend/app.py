@@ -247,6 +247,32 @@ def con():
 
 def now(): return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+def normalize_date_text(value, fallback=''):
+    text = str(value or '').strip()
+    if not text:
+        return fallback
+    # HTML date input(YYYY-MM-DD) 또는 기존 created_at(YYYY-MM-DD HH:MM:SS) 모두 허용
+    m = re.match(r'^(\d{4}-\d{2}-\d{2})', text)
+    if m:
+        return m.group(1)
+    m = re.match(r'^(\d{4})[./](\d{1,2})[./](\d{1,2})', text)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return fallback
+
+def add_one_year_date(date_text):
+    base = normalize_date_text(date_text, datetime.datetime.now().strftime('%Y-%m-%d'))
+    try:
+        d = datetime.datetime.strptime(base, '%Y-%m-%d').date()
+        try:
+            d2 = d.replace(year=d.year + 1)
+        except ValueError:
+            d2 = d + (datetime.date(d.year + 1, 3, 1) - datetime.date(d.year, 3, 1))
+        return d2.strftime('%Y-%m-%d')
+    except Exception:
+        return ''
+
+
 def clean_template_text(value):
     if value is None:
         return ''
@@ -421,6 +447,8 @@ def init_db():
             c.execute('ALTER TABLE members ADD COLUMN created_by INTEGER DEFAULT 0')
         if 'preferred_count' not in member_cols:
             c.execute('ALTER TABLE members ADD COLUMN preferred_count INTEGER DEFAULT 10')
+        if 'contract_end_at' not in member_cols:
+            c.execute('ALTER TABLE members ADD COLUMN contract_end_at TEXT DEFAULT ""')
         c.execute('CREATE TABLE IF NOT EXISTS recommendations(id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER, member_name TEXT, round_no INTEGER, mode TEXT, count INTEGER, numbers TEXT, analysis TEXT, sms TEXT, created_by INTEGER, created_at TEXT)')
         # V40 Phase1: 기존 Render SQLite가 오래된 스키마여도 자동 복구합니다.
         rec_cols = table_cols(c, 'recommendations')
@@ -1321,7 +1349,7 @@ class AdminReq(BaseModel): username:str; name:str='관리자'; password:str; rol
 class AdminUpdateReq(BaseModel): name:str|None=None; password:str|None=None; role:str|None=None; memo:str|None=None; is_active:int|None=None
 class MyAccountReq(BaseModel): name:str|None=None; phone:str|None=None; memo:str|None=None; current_password:str|None=None; new_password:str|None=None
 class PasswordReq(BaseModel): password:str
-class MemberReq(BaseModel): name:str; phone:str=''; grade:str='일반'; memo:str=''; status:str='활성'; priority:str='보통'; source:str='직접등록'; preferred_count:int=10
+class MemberReq(BaseModel): name:str; phone:str=''; grade:str='일반'; memo:str=''; status:str='활성'; priority:str='보통'; source:str='직접등록'; preferred_count:int=10; created_by:int|None=None; created_at:str|None=None; contract_end_at:str|None=None
 class MemberStatusReq(BaseModel): status:str; memo:str|None=None
 class MemberMemoReq(BaseModel): memo:str=''
 class MemberNoteReq(BaseModel): note:str; note_type:str='상담'
@@ -2485,9 +2513,16 @@ def bulk_member_status(req:MemberBulkStatusReq, request:Request, authorization: 
 @app.post('/api/members')
 def add_member(req:MemberReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
+    created_at = normalize_date_text(req.created_at, datetime.datetime.now().strftime('%Y-%m-%d')) if is_super_admin(admin) else datetime.datetime.now().strftime('%Y-%m-%d')
+    contract_end_at = normalize_date_text(req.contract_end_at, '') or add_one_year_date(created_at)
+    owner_id = int(req.created_by or admin['id']) if is_super_admin(admin) else int(admin['id'])
     with con() as c:
+        if owner_id:
+            owner = c.execute('SELECT id FROM admins WHERE id=?', (owner_id,)).fetchone()
+            if not owner:
+                raise HTTPException(400, '등록 관리자를 찾을 수 없습니다.')
         preferred_count=max(1, min(int(req.preferred_count or 10), 100))
-        cur=c.execute('INSERT INTO members(name,phone,grade,memo,status,priority,source,preferred_count,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(req.name,req.phone,req.grade,req.memo,req.status,req.priority,req.source,preferred_count,admin['id'],now(),now()))
+        cur=c.execute('INSERT INTO members(name,phone,grade,memo,status,priority,source,preferred_count,created_by,created_at,contract_end_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(req.name,req.phone,req.grade,req.memo,req.status,req.priority,req.source,preferred_count,owner_id,created_at,contract_end_at,now()))
         c.commit(); mid=cur.lastrowid
     log_action(admin,'CREATE_MEMBER',f'회원 등록: {req.name}',request); return {'id':mid}
 
@@ -2505,7 +2540,22 @@ def update_member(member_id:int, req:MemberReq, request:Request, authorization: 
     with con() as c:
         assert_member_access(c, admin, member_id)
         preferred_count=max(1, min(int(req.preferred_count or 10), 100))
-        c.execute('UPDATE members SET name=?, phone=?, grade=?, memo=?, status=?, priority=?, source=?, preferred_count=?, updated_at=? WHERE id=?', (req.name, req.phone, req.grade, req.memo, req.status, req.priority, req.source, preferred_count, now(), member_id))
+        fields=['name=?','phone=?','grade=?','memo=?','status=?','priority=?','source=?','preferred_count=?','updated_at=?']
+        vals=[req.name, req.phone, req.grade, req.memo, req.status, req.priority, req.source, preferred_count, now()]
+        # 대표관리자만 등록 관리자/등록일/계약만료일을 수정할 수 있습니다.
+        if is_super_admin(admin):
+            owner_id = int(req.created_by or 0)
+            if owner_id:
+                owner = c.execute('SELECT id FROM admins WHERE id=?', (owner_id,)).fetchone()
+                if not owner:
+                    raise HTTPException(400, '등록 관리자를 찾을 수 없습니다.')
+                fields.append('created_by=?'); vals.append(owner_id)
+            if req.created_at is not None:
+                fields.append('created_at=?'); vals.append(normalize_date_text(req.created_at, now()))
+            if req.contract_end_at is not None:
+                fields.append('contract_end_at=?'); vals.append(normalize_date_text(req.contract_end_at, ''))
+        vals.append(member_id)
+        c.execute('UPDATE members SET '+', '.join(fields)+' WHERE id=?', vals)
         c.commit()
     log_action(admin,'UPDATE_MEMBER',f'회원 수정 ID {member_id}: {req.name}',request)
     return {'ok':True}
@@ -3084,8 +3134,9 @@ def csv_response(filename, headers, rows):
 @app.get('/api/export/members_csv')
 def export_members_csv(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
-    with con() as c: rows=c.execute("SELECT id,name,phone,grade,status,COALESCE(priority,'보통') priority,COALESCE(source,'직접등록') source,last_contact_at,memo,created_at FROM members ORDER BY id DESC").fetchall()
-    return csv_response('BBLOTTO_members.csv', ['ID','이름','연락처','등급','상태','우선순위','유입경로','최근연락','메모','등록일'], [[r['id'],r['name'],r['phone'],r['grade'],r['status'],r['priority'],r['source'],r['last_contact_at'],r['memo'],r['created_at']] for r in rows])
+    with con() as c:
+        rows=c.execute("SELECT m.id,m.name,m.phone,m.grade,m.status,COALESCE(m.priority,'보통') priority,COALESCE(m.source,'직접등록') source,m.last_contact_at,m.memo,m.created_at,COALESCE(m.contract_end_at,'') contract_end_at,COALESCE(a.name,a.username,'미지정') registered_by_name FROM members m LEFT JOIN admins a ON a.id=COALESCE(m.created_by,0) ORDER BY m.id DESC").fetchall()
+    return csv_response('BBLOTTO_members.csv', ['ID','이름','연락처','등급','상태','우선순위','유입경로','최근연락','메모','등록일','계약만료일','등록관리자'], [[r['id'],r['name'],r['phone'],r['grade'],r['status'],r['priority'],r['source'],r['last_contact_at'],r['memo'],r['created_at'],r['contract_end_at'],r['registered_by_name']] for r in rows])
 
 @app.get('/api/export/recommendations_csv')
 def export_recommendations_csv(token: str|None=None, authorization: str|None = Header(default=None)):

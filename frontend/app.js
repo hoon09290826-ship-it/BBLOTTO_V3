@@ -27,6 +27,7 @@ let drawPage = 1;
 let drawPageSize = 10;
 let latestStatsCache = null;
 let currentAdmin = null;
+let adminCache = [];
 let sessionWatchTimer = null;
 let sessionWarned = false;
 const WORKSPACE_KEY = 'bb_v50_workspace_state';
@@ -189,6 +190,30 @@ function getMemberPreferredCount(m){
   const n = Number(m?.preferred_count || m?.combo_count || m?.recommend_count || 10);
   return Math.max(1, Math.min(Number.isFinite(n) ? n : 10, 100));
 }
+
+function toDateInputValue(value){
+  const s=String(value||'').trim();
+  const m=s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : '';
+}
+function oneYearAfter(value){
+  const base=toDateInputValue(value) || new Date().toISOString().slice(0,10);
+  const d=new Date(base+'T00:00:00');
+  if(Number.isNaN(d.getTime())) return '';
+  d.setFullYear(d.getFullYear()+1);
+  return d.toISOString().slice(0,10);
+}
+function refreshMemberAdminSelect(){
+  const sel=$('mCreatedBy'); if(!sel) return;
+  const current=String(sel.value||'');
+  const admins=Array.isArray(adminCache)?adminCache:[];
+  sel.innerHTML='<option value="">현재 로그인 관리자</option>'+admins.map(a=>`<option value="${a.id}">${esc(a.name||a.username||'관리자')} (${esc(a.username||'')})</option>`).join('');
+  if(current && Array.from(sel.options).some(o=>String(o.value)===current)) sel.value=current;
+  const editable=!!currentAdmin?.is_super_admin;
+  sel.disabled=!editable;
+  ['mCreatedAt','mContractEndAt'].forEach(id=>{ const el=$(id); if(el) el.disabled=!editable; });
+}
+
 function setGenCountValue(count){
   const sel=$('genCount'); if(!sel) return;
   const v=String(getMemberPreferredCount({preferred_count:count}));
@@ -593,7 +618,7 @@ function renderMembers(list){
       <div>
         <b>${esc(m.name||'')}</b>
         <p>${esc(m.phone||'')} · ${esc(memberGradeLabel(m.grade))} · ${esc(st)} · ${esc(m.priority||'보통')} · 🎯 ${esc(getMemberPreferredCount(m))}조합</p>
-        <small class="member-owner-line">등록 관리자: <strong>${esc(registeredBy)}</strong>${m.created_at ? ' · 등록일 ' + esc(m.created_at) : ''}</small>
+        <small class="member-owner-line">등록 관리자: <strong>${esc(registeredBy)}</strong>${m.created_at ? ' · 등록일 ' + esc(toDateInputValue(m.created_at)||m.created_at) : ''}${m.contract_end_at ? ' · 계약만료 ' + esc(toDateInputValue(m.contract_end_at)||m.contract_end_at) : ''}</small>
         <small>${esc(m.memo||'')}</small>
       </div>
       <div class="member-actions"><button class="combo-count-badge combo-generate-copy" onclick="generateMemberAndCopy(${m.id}, this)" title="이 회원 조합수로 추천번호 생성 후 문자 자동 복사">${esc(getMemberPreferredCount(m))}조합</button><button class="sms-save-copy-badge" onclick="generateMemberCopyAndSave(${m.id}, this)" title="추천번호 생성 후 문자 복사와 보낸문자 저장을 같이 실행">복사저장</button><button onclick="selectMember(${m.id})">선택</button><button onclick="detailMember(${m.id})">상세페이지</button><button onclick="quickMemberStatus(${m.id},'활성')">활성</button><button onclick="quickMemberStatus(${m.id},'정지')">정지</button><button onclick="quickMemberStatus(${m.id},'탈퇴')">탈퇴</button><button onclick="deleteMember(${m.id})">삭제</button></div>
@@ -616,6 +641,7 @@ async function loadMembers(){
   if(sort) params.set('sort', sort);
   // 서버에는 권한 범위만 맡기고, 검색/필터/페이지는 전체 목록 기준으로 프론트에서 처리합니다.
   membersCache = await api('/api/members' + (params.toString() ? '?'+params.toString() : ''));
+  refreshMemberAdminSelect();
   applyMemberFilters();
   renderMembers(memberFilteredCache); fillMemberSelect(membersCache); refreshSmsScopeInfo();
   setText('memberActive', membersCache.filter(m=>(m.status||'활성')==='활성').length);
@@ -1109,6 +1135,8 @@ async function loadAdmin(){
   }
   try{
     const admins=await api('/api/admins');
+    adminCache = Array.isArray(admins) ? admins : [];
+    refreshMemberAdminSelect();
     const addBox = $('addAdmin');
     ['newAdmin','newAdminName','newAdminRole','newAdminPw','newAdminMemo'].forEach(id=>{ const el=$(id); if(el) el.disabled=!isSuper; });
     if(addBox) addBox.disabled=!isSuper;
@@ -1151,7 +1179,7 @@ async function loadAdmin(){
 
 window.selectMember=function(id){
   const m=membersCache.find(x=>String(x.id)===String(id)); if(!m) return;
-  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||'');
+  setValue('mId',m.id); setValue('mName',m.name); setValue('mPhone',m.phone); setValue('mGrade',memberGradeLabel(m.grade)); setValue('mStatus',m.status||'활성'); setValue('mPriority',m.priority||'보통'); setValue('mPreferredCount',getMemberPreferredCount(m)); setValue('mCreatedBy',m.created_by||''); setValue('mCreatedAt',toDateInputValue(m.created_at)); setValue('mContractEndAt',toDateInputValue(m.contract_end_at)||oneYearAfter(m.created_at)); setValue('mSource',m.source||'직접등록'); setValue('mMemo',m.memo||''); refreshMemberAdminSelect();
   if($('genMember')) $('genMember').value=id;
   setGenCountValue(getMemberPreferredCount(m));
   refreshSmsPreview();
@@ -1374,11 +1402,12 @@ async function saveMember(){
 }
 async function addMember(){
   const id=$('mId')?.value;
-  const body={name:$('mName')?.value||'', phone:$('mPhone')?.value||'', grade:memberGradeLabel($('mGrade')?.value||'일반'), status:$('mStatus')?.value||'활성', priority:$('mPriority')?.value||'보통', preferred_count:getMemberPreferredCount({preferred_count:$('mPreferredCount')?.value||10}), source:$('mSource')?.value||'직접등록', memo:$('mMemo')?.value||''};
+  const body={name:$('mName')?.value||'', phone:$('mPhone')?.value||'', grade:memberGradeLabel($('mGrade')?.value||'일반'), status:$('mStatus')?.value||'활성', priority:$('mPriority')?.value||'보통', preferred_count:getMemberPreferredCount({preferred_count:$('mPreferredCount')?.value||10}), created_by:Number($('mCreatedBy')?.value||0)||null, created_at:$('mCreatedAt')?.value||'', contract_end_at:$('mContractEndAt')?.value||'', source:$('mSource')?.value||'직접등록', memo:$('mMemo')?.value||''};
   if(!body.name.trim()){ alert('회원 이름을 입력하세요.'); return; }
   if(id) await api('/api/members/'+id,{method:'PUT',body}); else await api('/api/members',{method:'POST',body});
   ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,''));
-  setValue('mGrade','일반'); setValue('mStatus','활성'); setValue('mPriority','보통'); setValue('mPreferredCount','10'); setValue('mSource','');
+  setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractEndAt','');
+  setValue('mGrade','일반'); setValue('mStatus','활성'); setValue('mPriority','보통'); setValue('mPreferredCount','10'); setValue('mSource',''); refreshMemberAdminSelect();
   await loadMembers(); await loadDashboard(); toast('회원 정보가 저장되었습니다.');
 }
 function autoTemplate(){
@@ -2017,7 +2046,8 @@ function bind(){
   $('generate')?.addEventListener('click',safe(generate));
   $('addMember')?.addEventListener('click',safe(addMember));
   $('saveMemberBtn')?.addEventListener('click',safe(saveMember));
-  $('clearMember')?.addEventListener('click',()=>{ ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,'')); setValue('mPreferredCount','10'); });
+  $('clearMember')?.addEventListener('click',()=>{ ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,'')); setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractEndAt',''); setValue('mPreferredCount','10'); refreshMemberAdminSelect(); });
+  $('mCreatedAt')?.addEventListener('change',()=>{ if(!$('mContractEndAt')?.value) setValue('mContractEndAt', oneYearAfter($('mCreatedAt')?.value)); });
   $('memberDetailBack')?.addEventListener('click',()=>openPanel('members','회원 관리'));
   $('memberSearch')?.addEventListener('input',()=>scheduleMemberRefresh());
   $('memberSearch')?.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); clearTimeout(memberSearchTimer); saveMemberFilterState(); refreshMemberView(); } });
