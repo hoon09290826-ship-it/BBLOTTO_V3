@@ -1173,7 +1173,8 @@ async function syncAiV6FullHistory(){
   try{
     const d = await api('/api/admin/ai-v6/full-sync?max_round=1231', {method:'POST'});
     renderAiV6CacheStatus(d.cache || d);
-    toast('전체 회차 분석 저장 완료');
+    const done = !!(d.completed || d?.cache?.is_full_history || d?.is_full_history);
+    toast(done ? '1~1231 전체 회차 분석 저장 완료' : (d.message || '전체 분석이 아직 완료되지 않았습니다. 누락 회차를 확인하세요.'));
   }finally{
     setBusy('syncAiV6FullHistory', false);
   }

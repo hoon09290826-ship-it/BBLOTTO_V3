@@ -7499,7 +7499,8 @@ try:
         cache = _bb_v6_cache_ui(True, target_round=max_round)
         return {
             'ok': True,
-            'message': f'1회차~{max_round}회차 전체 동기화/분석 저장 완료',
+            'message': sync_result.get('message') or (f'1회차~{max_round}회차 전체 동기화/분석 저장 완료' if cache.get('is_full_history') else f'전체 분석 미완료: {cache.get("missing_rounds_count", 0)}개 누락'),
+            'completed': bool(cache.get('is_full_history')),
             'sync_result': sync_result,
             'cache': {
                 'engine_version': cache.get('engine_version'),
@@ -7549,6 +7550,6 @@ try:
         require_admin(authorization)
         sync_result = _bb_v6_sync_full_ui(max_round=max_round)
         cache = _bb_v6_cache_ui(True, target_round=max_round)
-        return {'ok': True, 'message': f'1회차~{max_round}회차 전체 동기화/분석 저장 완료', 'sync_result': sync_result, 'cache': cache}
+        return {'ok': bool(cache.get('is_full_history')), 'message': sync_result.get('message') or ('전체 저장/분석 완료' if cache.get('is_full_history') else '전체 분석 미완료'), 'sync_result': sync_result, 'cache': cache}
 except Exception as _bb_v6_ui_sync_error:
     print('[BBLOTTO] AI V6 admin UI sync endpoint failed:', _bb_v6_ui_sync_error)

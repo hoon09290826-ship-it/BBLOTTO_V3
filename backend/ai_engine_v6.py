@@ -13,6 +13,8 @@ import json
 import random
 import sqlite3
 import time
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -539,18 +541,36 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
 
 
 # ---- 공식 동행복권 API 보강 ----
-def _official_fetch(round_no: int, timeout: int = 6) -> Optional[Dict[str, Any]]:
+def _official_fetch(round_no: int, timeout: int = 4) -> Optional[Dict[str, Any]]:
+    """동행복권 공식 회차 JSON을 가져온다.
+    - 1~1231 전체 동기화를 위해 User-Agent/Referer를 넣고 HTTPS 실패 시 HTTP도 재시도한다.
+    - 실패 시 None을 반환하여 누락 회차로 표시한다.
+    """
     import urllib.request
-    url = f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={int(round_no)}"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as res:
-            data = json.loads(res.read().decode("utf-8"))
-        if data.get("returnValue") != "success":
-            return None
-        nums = [int(data[f"drwtNo{i}"]) for i in range(1, 7)]
-        return {"r": int(data["drwNo"]), "d": str(data.get("drwNoDate") or ""), "n": nums, "b": int(data["bnusNo"])}
-    except Exception:
-        return None
+    import urllib.parse
+    r = int(round_no)
+    urls = [
+        f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={urllib.parse.quote(str(r))}",
+        f"http://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={urllib.parse.quote(str(r))}",
+    ]
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; BBLOTTO-FullHistorySync/1.0)",
+                "Accept": "application/json,text/plain,*/*",
+                "Referer": "https://www.dhlottery.co.kr/",
+            })
+            with urllib.request.urlopen(req, timeout=timeout) as res:
+                data = json.loads(res.read().decode("utf-8", errors="ignore"))
+            if data.get("returnValue") != "success":
+                continue
+            nums = [int(data[f"drwtNo{i}"]) for i in range(1, 7)]
+            bonus = int(data["bnusNo"])
+            if len(set(nums)) == 6 and all(1 <= n <= 45 for n in nums) and 1 <= bonus <= 45:
+                return {"r": int(data["drwNo"]), "d": str(data.get("drwNoDate") or ""), "n": sorted(nums), "b": bonus}
+        except Exception:
+            continue
+    return None
 
 
 def _ensure_draws_table() -> None:
@@ -589,28 +609,43 @@ def _save_draw(draw: Dict[str, Any]) -> None:
 
 
 def sync_official_full_history(max_round: Optional[int] = DEFAULT_TARGET_ROUND, stop_after_miss: int = 3) -> Dict[str, Any]:
-    """1회차부터 max_round까지 누락분을 공식 API로 보강하고 DB 캐시를 재생성한다."""
+    """1회차부터 max_round까지 누락분을 공식 API로 보강하고 DB 캐시를 재생성한다.
+
+    RC8.6 핵심 수정:
+    - 버튼을 눌렀을 때 상태 확인만 하지 않고 실제로 1~1231 누락 회차를 공식 API에서 내려받아 저장한다.
+    - 단일 요청 반복이 느려서 동시 다운로드 방식으로 변경했다.
+    - 완료되지 않았는데도 "완료"라고 표시하지 않도록 is_full_history 기준으로 결과를 분리한다.
+    """
     before = _load_draws()
     existing = {int(d["r"]) for d in before}
     target = int(max_round or DEFAULT_TARGET_ROUND)
+    missing = [r for r in range(MIN_REQUIRED_ROUND, target + 1) if r not in existing]
     saved = 0
-    failed = 0
     failed_rounds: List[int] = []
 
-    for r in range(MIN_REQUIRED_ROUND, target + 1):
-        if r in existing:
-            continue
-        d = _official_fetch(r)
-        if d:
-            _save_draw(d)
-            saved += 1
-            existing.add(r)
-        else:
-            failed += 1
-            if len(failed_rounds) < 50:
-                failed_rounds.append(r)
+    # Railway/Render에서도 너무 오래 걸리지 않도록 동시 요청한다.
+    # 환경변수 BBLOTTO_SYNC_WORKERS로 조절 가능, 기본 16개.
+    workers = max(1, min(int(os.getenv("BBLOTTO_SYNC_WORKERS", "16") or "16"), 32))
+    if missing:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(_official_fetch, r): r for r in missing}
+            for fut in as_completed(futures):
+                r = futures[fut]
+                try:
+                    d = fut.result()
+                except Exception:
+                    d = None
+                if d:
+                    try:
+                        _save_draw(d)
+                        saved += 1
+                        existing.add(int(d["r"]))
+                    except Exception:
+                        failed_rounds.append(r)
+                else:
+                    failed_rounds.append(r)
 
-    # max_round를 비워서 호출한 경우에는 최신 회차까지 자동 탐색
+    # max_round를 비워서 호출한 경우에는 최신 회차까지 자동 탐색한다.
     if max_round is None:
         miss = 0
         r = max(existing) + 1 if existing else 1
@@ -626,20 +661,28 @@ def sync_official_full_history(max_round: Optional[int] = DEFAULT_TARGET_ROUND, 
             r += 1
 
     cache = get_analysis_cache(True, target_round=target)
+    is_full = bool(cache.get("is_full_history"))
+    missing_count = int(cache.get("missing_rounds_count") or 0)
     return {
-        "ok": True,
+        "ok": is_full,
+        "completed": is_full,
+        "message": (f"1회차~{target}회차 전체 저장/분석 완료" if is_full else f"전체 분석 미완료: {missing_count}개 회차가 아직 누락되었습니다."),
+        "requested_range": [1, target],
         "saved": saved,
-        "failed": failed,
-        "failed_rounds_sample": failed_rounds,
+        "failed": len(failed_rounds),
+        "failed_rounds_sample": failed_rounds[:50],
         "draw_count_before": len(before),
         "draw_count_after": cache.get("draw_count"),
+        "actual_count": cache.get("actual_count"),
+        "expected_count": cache.get("expected_count"),
         "round_range": cache.get("round_range"),
         "latest_round": cache.get("latest_round"),
         "target_round": cache.get("target_round"),
-        "is_full_history": cache.get("is_full_history"),
-        "missing_rounds_count": cache.get("missing_rounds_count"),
+        "is_full_history": is_full,
+        "missing_rounds_count": missing_count,
         "missing_rounds_sample": cache.get("missing_rounds_sample"),
         "cache_rebuilt": True,
         "cache_storage": "database.ai_analysis_cache",
         "engine_version": ENGINE_VERSION,
+        "source": "dhlottery_official_api",
     }
