@@ -1047,7 +1047,7 @@ function renderWinningHistoryCard(r){
 
 function applyAdminVisibility(isSuper){
   // PHASE28: 일반 관리자는 시스템/관리자 관리 메뉴를 숨기고, 내 계정만 허용
-  ['adminSecurityBox','adminBackupBox','adminStatsBox','adminLogsBox','adminAddBox'].forEach(id=>{
+  ['adminSecurityBox','adminBackupBox','adminStatsBox','adminLogsBox','adminAddBox','adminAiEngineBox'].forEach(id=>{
     const el=$(id);
     if(el) el.style.display = isSuper ? '' : 'none';
   });
@@ -1142,6 +1142,46 @@ function closeAdminCreateModal(){
 window.openAdminCreateModal=openAdminCreateModal;
 window.closeAdminCreateModal=closeAdminCreateModal;
 
+
+function renderAiV6CacheStatus(d){
+  const ok = !!d?.is_full_history;
+  setText('aiV6CacheBadge', ok ? '전체 저장 완료' : '누락 있음');
+  const range = Array.isArray(d?.round_range) ? d.round_range.join('~') : (d?.round_range || '-');
+  const missing = Number(d?.missing_rounds_count || 0);
+  const sample = Array.isArray(d?.missing_rounds_sample) ? d.missing_rounds_sample.join(', ') : '';
+  setHTML('aiV6CacheStatus', `
+    <b>엔진:</b> ${esc(d?.engine_version || '-')}<br>
+    <b>저장방식:</b> ${esc(d?.cache_storage || '-')}<br>
+    <b>분석범위:</b> ${esc(range)} / 최신 ${esc(d?.latest_round || '-')}회<br>
+    <b>저장 회차:</b> ${esc(d?.actual_count || 0)} / ${esc(d?.expected_count || 1231)}<br>
+    <b>1~1231 전체 여부:</b> ${ok ? '예' : '아니오'}<br>
+    <b>누락:</b> ${missing}개 ${sample ? '('+esc(sample)+')' : ''}
+  `);
+}
+
+async function checkAiV6CacheStatus(){
+  const d = await api('/api/admin/ai-v6/cache-status?target_round=1231');
+  renderAiV6CacheStatus(d);
+  return d;
+}
+
+async function syncAiV6FullHistory(){
+  if(!confirm('1회차~1231회차 전체 동기화/분석을 시작할까요? 처음 실행은 시간이 조금 걸릴 수 있습니다.')) return;
+  setBusy('syncAiV6FullHistory', true, '동기화/분석 중...');
+  setText('aiV6CacheBadge', '진행 중');
+  setHTML('aiV6CacheStatus', '전체 회차 동기화와 분석 캐시 저장을 진행 중입니다. 잠시만 기다려주세요.');
+  try{
+    const d = await api('/api/admin/ai-v6/full-sync?max_round=1231', {method:'POST'});
+    renderAiV6CacheStatus(d.cache || d);
+    toast('전체 회차 분석 저장 완료');
+  }finally{
+    setBusy('syncAiV6FullHistory', false);
+  }
+}
+
+window.checkAiV6CacheStatus = safe(checkAiV6CacheStatus);
+window.syncAiV6FullHistory = safe(syncAiV6FullHistory);
+
 async function loadAdmin(){
   try{ currentAdmin = await api('/api/me'); setText('who', currentAdmin.name || currentAdmin.username || '관리자'); startSessionWatcher(currentAdmin); renderMyAccount(); }catch(e){ currentAdmin=null; }
   const isSuper = !!currentAdmin?.is_super_admin;
@@ -1203,6 +1243,7 @@ async function loadAdmin(){
     }).join('') || '등록된 관리자가 없습니다.');
   }catch(e){ setHTML('adminList','관리자 목록을 불러오지 못했습니다.'); }
   if(isSuper){
+    try{ await checkAiV6CacheStatus(); }catch(e){}
     try{
       const backups=await api('/api/backups');
       renderBackupList(backups);
@@ -2362,3 +2403,12 @@ async function loadOpsHealth(){
   }catch(e){ console.warn('ops health failed', e); return null; }
 }
 setTimeout(()=>{ if(typeof token==='function' && token()) loadOpsHealth(); }, 1200);
+
+
+(function bindAiV6AdminButtons(){
+  const bind=()=>{
+    const a=document.getElementById('checkAiV6Cache'); if(a && !a.dataset.bound){ a.dataset.bound='1'; a.addEventListener('click', window.checkAiV6CacheStatus); }
+    const b=document.getElementById('syncAiV6FullHistory'); if(b && !b.dataset.bound){ b.dataset.bound='1'; b.addEventListener('click', window.syncAiV6FullHistory); }
+  };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', bind); else bind();
+})();
