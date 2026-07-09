@@ -4427,11 +4427,7 @@ def combo_score(combo, st):
     return round(max(65, min(94.9, score)), 1)
 
 # ===== PATCH 023: BBLOTTO AI ENGINE V1 INSTALL =====
-try:
-    from backend.recommend_engine_v1 import install as _install_recommend_engine_v1
-except Exception:
-    from recommend_engine_v1 import install as _install_recommend_engine_v1
-_install_recommend_engine_v1(globals())
+# RC8-2: 기존 recommend_engine_v1 설치 훅 제거. 추천번호 생성은 하단 AI V4 make_premium_combos()만 사용합니다.
 
 
 # ===== RC2 SPRINT 2-3: AI ENGINE V2 + DASHBOARD INSIGHT PATCH =====
