@@ -7386,3 +7386,98 @@ def _v4_combo_score(combo, st, mode, ext, profile, member_grade='일반'):
     elif g == '2등': s += 3.7
     s += ((sum(n * n for n in combo) + sum(combo) * 3) % 29 - 14) * 0.065
     return round(max(72.0, min(99.2, s)), 1)
+
+# =========================================================
+# BBLOTTO AI V5 FULL HISTORY CACHE FAST PATCH
+# 추천번호 생성은 최종적으로 ai_engine_v5 캐시 엔진만 사용합니다.
+# - DB 전체 회차 분석값을 database/ai_v5_analysis_cache.json에 저장
+# - 새 회차가 추가되면 자동 재분석
+# - /api/generate 기존 호출은 그대로 유지
+# =========================================================
+try:
+    from .ai_engine_v5 import make_premium_combos as make_premium_combos
+    from .ai_engine_v5 import latest_stats as latest_stats
+    from .ai_engine_v5 import get_analysis_cache as _ai_v5_get_analysis_cache
+    BBLOTTO_AI_V5_ENGINE_VERSION = 'BBLOTTO_AI_V5_FULL_HISTORY_CACHE_FAST'
+
+    @app.get('/api/ai-engine/v5-cache')
+    def ai_engine_v5_cache(authorization: str|None = Header(default=None), force: int = 0):
+        require_admin(authorization)
+        cache = _ai_v5_get_analysis_cache(bool(force))
+        return {
+            'ok': True,
+            'engine_version': cache.get('engine_version'),
+            'draw_count': cache.get('draw_count'),
+            'round_range': cache.get('round_range'),
+            'latest_round': cache.get('latest_round'),
+            'next_round': cache.get('next_round'),
+            'hot': cache.get('hot', [])[:12],
+            'cold': cache.get('cold', [])[:12],
+            'overdue': cache.get('overdue', [])[:12],
+            'avg_sum30': cache.get('avg_sum30'),
+            'avg_ac30': cache.get('avg_ac30'),
+            'cache_used': True,
+        }
+except Exception as _v5_import_error:
+    BBLOTTO_AI_V5_ENGINE_VERSION = 'BBLOTTO_AI_V5_IMPORT_FAILED'
+    print('[BBLOTTO] AI V5 engine import failed:', _v5_import_error)
+
+# AI V5 공식 당첨번호 전체 동기화: 필요할 때 관리자만 수동 실행
+try:
+    from .ai_engine_v5 import sync_official_full_history as _ai_v5_sync_official_full_history
+
+    @app.post('/api/ai-engine/v5-sync-full')
+    def ai_engine_v5_sync_full(authorization: str|None = Header(default=None), max_round: int|None = None):
+        require_admin(authorization)
+        return _ai_v5_sync_official_full_history(max_round=max_round)
+except Exception as _v5_sync_import_error:
+    print('[BBLOTTO] AI V5 sync endpoint failed:', _v5_sync_import_error)
+
+# =========================================================
+# BBLOTTO AI V6 DB FULL HISTORY CACHE FINAL PATCH
+# - 분석 결과를 database/bblotto_v34.db 의 ai_analysis_cache 테이블에 저장
+# - 1회차~1231회차 전체 보유 여부를 API로 확인 가능
+# - 추천번호 생성은 최종적으로 ai_engine_v6만 사용
+# =========================================================
+try:
+    from .ai_engine_v6 import make_premium_combos as make_premium_combos
+    from .ai_engine_v6 import latest_stats as latest_stats
+    from .ai_engine_v6 import get_analysis_cache as _ai_v6_get_analysis_cache
+    BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_AI_V6_DB_FULL_HISTORY_CACHE'
+
+    @app.get('/api/ai-engine/v6-cache')
+    def ai_engine_v6_cache(authorization: str|None = Header(default=None), force: int = 0, target_round: int = 1231):
+        require_admin(authorization)
+        cache = _ai_v6_get_analysis_cache(bool(force), target_round=target_round)
+        return {
+            'ok': True,
+            'engine_version': cache.get('engine_version'),
+            'cache_storage': cache.get('cache_storage'),
+            'analysis_confirm': cache.get('analysis_confirm'),
+            'draw_count': cache.get('draw_count'),
+            'actual_count': cache.get('actual_count'),
+            'expected_count': cache.get('expected_count'),
+            'round_range': cache.get('round_range'),
+            'latest_round': cache.get('latest_round'),
+            'target_round': cache.get('target_round'),
+            'is_full_history': cache.get('is_full_history'),
+            'missing_rounds_count': cache.get('missing_rounds_count'),
+            'missing_rounds_sample': cache.get('missing_rounds_sample'),
+            'hot': cache.get('hot', [])[:12],
+            'cold': cache.get('cold', [])[:12],
+            'overdue': cache.get('overdue', [])[:12],
+            'cache_used': True,
+        }
+except Exception as _v6_import_error:
+    BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_AI_V6_IMPORT_FAILED'
+    print('[BBLOTTO] AI V6 engine import failed:', _v6_import_error)
+
+try:
+    from .ai_engine_v6 import sync_official_full_history as _ai_v6_sync_official_full_history
+
+    @app.post('/api/ai-engine/v6-sync-full')
+    def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int = 1231):
+        require_admin(authorization)
+        return _ai_v6_sync_official_full_history(max_round=max_round)
+except Exception as _v6_sync_import_error:
+    print('[BBLOTTO] AI V6 sync endpoint failed:', _v6_sync_import_error)
