@@ -27,6 +27,7 @@ let drawPage = 1;
 let drawPageSize = 10;
 let latestStatsCache = null;
 let currentAdmin = null;
+let quickMemberGenerationMode = false;
 let adminCache = [];
 let sessionWatchTimer = null;
 let sessionWarned = false;
@@ -1331,6 +1332,38 @@ async function copyTextToClipboard(text){
   ta.remove();
 }
 
+function closeMemberQuickResult(){
+  document.getElementById('memberQuickResultModal')?.remove();
+}
+window.closeMemberQuickResult = closeMemberQuickResult;
+
+function showMemberQuickResult(member, combos, analysis, copied=true, saved=false){
+  closeMemberQuickResult();
+  const rows=normalizeCombos(combos).map((c,i)=>`<div class="quick-result-row"><b>${i+1}</b><span>${esc(c.join(', '))}</span></div>`).join('');
+  const lines=String(analysis||'').split(/\n+/).map(v=>v.trim()).filter(Boolean).map(v=>`<p>${esc(v)}</p>`).join('');
+  const modal=document.createElement('div');
+  modal.id='memberQuickResultModal';
+  modal.className='quick-result-overlay';
+  modal.innerHTML=`
+    <div class="quick-result-modal" role="dialog" aria-modal="true" aria-label="회원 추천번호 생성 결과">
+      <div class="quick-result-head">
+        <div><small>회원관리 간편 생성</small><h3>${esc(member?.name||'회원')} · ${esc(currentRound||'')}회차</h3></div>
+        <button type="button" class="quick-result-close" onclick="closeMemberQuickResult()">닫기</button>
+      </div>
+      <div class="quick-result-status">추천번호 ${normalizeCombos(combos).length}조합 생성 완료${copied?' · 문자 복사 완료':''}${saved?' · 보낸문자 저장 완료':''}</div>
+      <div class="quick-result-grid">
+        <section><h4>추천번호</h4><div class="quick-result-combos">${rows}</div></section>
+        <section><h4>이번 회차 핵심 분석</h4><div class="quick-result-analysis">${lines||'<p>분석요약이 없습니다.</p>'}</div></section>
+      </div>
+      <div class="quick-result-actions">
+        <button type="button" onclick="copyTextToClipboard(document.getElementById('smsPreview')?.value || currentSms).then(()=>toast('문자 내용을 다시 복사했습니다.'))">문자 다시 복사</button>
+        <button type="button" class="primary" onclick="closeMemberQuickResult()">회원관리 계속하기</button>
+      </div>
+    </div>`;
+  modal.addEventListener('click',e=>{ if(e.target===modal) closeMemberQuickResult(); });
+  document.body.appendChild(modal);
+}
+
 async function saveCurrentSmsLog(){
   const mid=$('genMember')?.value;
   if(!mid){ throw new Error('회원을 선택해야 보낸문자를 저장할 수 있습니다.'); }
@@ -1358,14 +1391,14 @@ window.generateMemberAndCopy = safe(async function(id, btn){
     if(btn){ btn.disabled=true; btn.textContent='생성중'; }
     window.selectMember(id);
     setGenCountValue(getMemberPreferredCount(m));
-    await generate();
+    quickMemberGenerationMode=true;
+    try{ await generate(); } finally { quickMemberGenerationMode=false; }
     const expected=getMemberPreferredCount(m);
     if(normalizeCombos(currentCombos).length!==expected) throw new Error(`추천번호 ${expected}조합 생성 확인에 실패했습니다.`);
     if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
-    openPanel('generator','추천번호 생성');
     const text = ($('smsPreview')?.value || currentSms || '').trim();
     await copyTextToClipboard(text);
-    setTimeout(()=>document.getElementById('comboList')?.scrollIntoView({behavior:'smooth',block:'start'}),80);
+    showMemberQuickResult(m,currentCombos,currentAnalysis,true,false);
     toast(`${m.name} ${expected}조합 + 분석요약 생성 및 문자 복사 완료`);
     if(btn) btn.textContent='복사완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || `${getMemberPreferredCount(m)}조합`; btn.disabled=false; } }, 1200);
@@ -1384,16 +1417,17 @@ window.generateMemberCopyAndSave = safe(async function(id, btn){
     if(btn){ btn.disabled=true; btn.textContent='생성중'; }
     window.selectMember(id);
     setGenCountValue(getMemberPreferredCount(m));
-    await generate();
+    quickMemberGenerationMode=true;
+    try{ await generate(); } finally { quickMemberGenerationMode=false; }
     const expected=getMemberPreferredCount(m);
     if(normalizeCombos(currentCombos).length!==expected) throw new Error(`추천번호 ${expected}조합 생성 확인에 실패했습니다.`);
     if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
-    openPanel('generator','추천번호 생성');
     const text = ($('smsPreview')?.value || currentSms || '').trim();
     await copyTextToClipboard(text);
     await saveCurrentSmsLog();
     await Promise.all([loadDashboard(), loadMembers()]);
     if($('genMember')) $('genMember').value=String(id);
+    showMemberQuickResult(m,currentCombos,currentAnalysis,true,true);
     toast(`${m.name} ${getMemberPreferredCount(m)}조합 문자 복사 + 보낸문자 저장 완료`);
     if(btn) btn.textContent='저장완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || '복사저장'; btn.disabled=false; } }, 1200);
@@ -1518,7 +1552,7 @@ async function generate(){
     await Promise.all([loadDashboard(), loadMembers(), loadStats(0)]);
     if(selectedMemberId && $('genMember')) $('genMember').value=selectedMemberId;
     refreshSmsPreview();
-    scrollToMessagePanel();
+    if(!quickMemberGenerationMode) scrollToMessagePanel();
     saveWorkspaceState();
     toast('추천번호 생성 및 회원 안내 문구 갱신 완료');
   }catch(e){
