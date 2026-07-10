@@ -573,6 +573,48 @@ def _official_fetch(round_no: int, timeout: int = 4) -> Optional[Dict[str, Any]]
     return None
 
 
+def _bulk_fetch_all(max_round: int):
+    import urllib.request
+    url = "https://smok95.github.io/lotto/results/all.json"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0 BBLOTTO/2.0","Accept":"application/json"})
+        with urllib.request.urlopen(req, timeout=20) as res:
+            raw = json.loads(res.read().decode("utf-8", errors="ignore"))
+        out = []
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                r = int(item.get("draw_no"))
+                if not 1 <= r <= int(max_round):
+                    continue
+                nums = sorted(int(x) for x in item.get("numbers", []))
+                bonus = int(item.get("bonus_no"))
+                if len(nums) == 6 and len(set(nums)) == 6 and all(1 <= n <= 45 for n in nums):
+                    out.append({"r": r, "d": str(item.get("date") or "")[:10], "n": nums, "b": bonus})
+            except Exception:
+                continue
+        return out, None
+    except Exception as e:
+        return [], f"전체 회차 데이터 다운로드 실패: {type(e).__name__}: {e}"
+
+
+def _save_draws_bulk(draws):
+    if not draws:
+        return 0
+    _ensure_draws_table()
+    with _conn(DB_PATH) as con:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(draws)").fetchall()}
+        if "numbers" in cols:
+            sql = """INSERT OR REPLACE INTO draws(round_no, draw_date, numbers, bonus, source, updated_at)
+                     VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)"""
+            rows = [(int(d["r"]), d.get("d", ""), json.dumps(d["n"], ensure_ascii=False), int(d.get("b") or 0), "bulk_full_sync") for d in draws]
+        else:
+            sql = """INSERT OR REPLACE INTO draws(round_no, draw_date, n1,n2,n3,n4,n5,n6, bonus, source)
+                     VALUES(?,?,?,?,?,?,?,?,?,?)"""
+            rows = [(int(d["r"]), d.get("d", ""), *d["n"], int(d.get("b") or 0), "bulk_full_sync") for d in draws]
+        con.executemany(sql, rows)
+    return len(rows)
+
+
 def _ensure_draws_table() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _conn(DB_PATH) as con:
@@ -689,56 +731,64 @@ def sync_official_full_history(max_round: Optional[int] = DEFAULT_TARGET_ROUND, 
 
 
 def sync_official_history_step(max_round: int = DEFAULT_TARGET_ROUND, chunk_size: int = 40) -> Dict[str, Any]:
-    """Railway timeout 방지용 단계별 동기화.
-    한 번에 전체 1231개를 요청하지 않고 누락 회차 중 일부만 저장한 뒤
-    프론트에서 반복 호출한다.
-    """
     target = int(max_round or DEFAULT_TARGET_ROUND)
-    chunk = max(5, min(int(chunk_size or 40), 80))
     before = _load_draws()
     existing = {int(d["r"]) for d in before}
-    missing = [r for r in range(MIN_REQUIRED_ROUND, target + 1) if r not in existing]
-    batch = missing[:chunk]
+    missing_before = [r for r in range(MIN_REQUIRED_ROUND, target + 1) if r not in existing]
     saved = 0
     failed_rounds: List[int] = []
+    source = "cache_only"
+    error = None
 
-    workers = max(1, min(int(os.getenv("BBLOTTO_SYNC_WORKERS", "5") or "5"), 8))
-    if batch:
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(_official_fetch, r): r for r in batch}
-            for fut in as_completed(futures):
-                r = futures[fut]
-                try:
-                    d = fut.result()
-                except Exception:
-                    d = None
-                if d:
+    if missing_before:
+        bulk, bulk_error = _bulk_fetch_all(target)
+        if bulk:
+            need = set(missing_before)
+            saved = _save_draws_bulk([d for d in bulk if int(d["r"]) in need])
+            source = "github_bulk_all_json"
+        else:
+            error = bulk_error
+            chunk = max(5, min(int(chunk_size or 20), 30))
+            batch = missing_before[:chunk]
+            workers = max(1, min(int(os.getenv("BBLOTTO_SYNC_WORKERS", "4") or "4"), 6))
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futures = {ex.submit(_official_fetch, r): r for r in batch}
+                for fut in as_completed(futures):
+                    r = futures[fut]
                     try:
-                        _save_draw(d)
-                        saved += 1
-                        existing.add(int(d["r"]))
+                        d = fut.result()
                     except Exception:
+                        d = None
+                    if d:
+                        try:
+                            _save_draw(d)
+                            saved += 1
+                        except Exception:
+                            failed_rounds.append(r)
+                    else:
                         failed_rounds.append(r)
-                else:
-                    failed_rounds.append(r)
+            source = "dhlottery_round_fallback"
 
-    # 매 단계마다 가벼운 상태 확인. 마지막 또는 저장분이 있을 때 캐시 재생성.
-    remaining_est = max(0, len(missing) - len(batch) + len(failed_rounds))
-    rebuild = (remaining_est == 0) or saved > 0
-    cache = get_analysis_cache(bool(rebuild), target_round=target)
+    cache = get_analysis_cache(True, target_round=target)
     completed = bool(cache.get("is_full_history"))
-    total_expected = int(cache.get("expected_count") or target)
     actual = int(cache.get("actual_count") or 0)
+    expected = int(cache.get("expected_count") or target)
+    remaining = int(cache.get("missing_rounds_count") or 0)
+    message = (f"1회차~{target}회차 전체 저장/분석 완료" if completed else f"동기화 미완료: {actual}/{expected}회차 저장, {remaining}개 누락")
+    if error and saved == 0:
+        message += f" · {error}"
     return {
-        "ok": True,
+        "ok": completed or saved > 0,
         "completed": completed,
-        "message": (f"1회차~{target}회차 전체 저장/분석 완료" if completed else f"동기화 진행 중: {actual}/{total_expected}회차 저장"),
+        "message": message,
         "saved": saved,
-        "processed": len(batch),
+        "processed": len(missing_before),
         "failed": len(failed_rounds),
         "failed_rounds_sample": failed_rounds[:20],
-        "remaining_count": int(cache.get("missing_rounds_count") or 0),
+        "remaining_count": remaining,
         "next_missing_sample": cache.get("missing_rounds_sample"),
+        "source": source,
+        "error": error if saved == 0 else None,
         "cache": {
             "engine_version": cache.get("engine_version"),
             "cache_storage": cache.get("cache_storage"),
@@ -753,5 +803,5 @@ def sync_official_history_step(max_round: int = DEFAULT_TARGET_ROUND, chunk_size
             "missing_rounds_sample": cache.get("missing_rounds_sample"),
         },
         "engine_version": ENGINE_VERSION,
-        "source": "dhlottery_official_api_step_sync",
     }
+
