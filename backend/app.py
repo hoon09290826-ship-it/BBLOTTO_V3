@@ -1215,14 +1215,11 @@ def build_sms(member_name, round_no, combos, analysis, details):
     return '\n'.join([
         f'안녕하세요 {name}님, BBLOTTO입니다.',
         f'{round_no}회차 추천번호와 이번 회차 분석을 안내드립니다.',
-        '',
         '[추천번호]',
         *[f'{i+1}. '+', '.join(map(str,c)) for i,c in enumerate(combos)],
-        '',
         '[분석요약]',
         analysis,
         best_line,
-        '',
         '좋은 결과 있으시길 바랍니다.'
     ]).strip()
 
@@ -4232,14 +4229,11 @@ def build_sms(member_name, round_no, combos, analysis, details):
     return '\n'.join([
         f'안녕하세요 {name}님, BBLOTTO입니다.',
         f'{round_no}회차 추천번호와 이번 회차 분석을 안내드립니다.',
-        '',
         '[추천번호]',
         *[f'{i+1}. '+', '.join(map(str,c)) for i,c in enumerate(combos)],
-        '',
         '[분석요약]',
         analysis,
         best_line,
-        '',
         '좋은 결과 있으시길 바랍니다.'
     ]).strip()
 
@@ -5758,7 +5752,7 @@ def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
         f'핵심 흐름은 {", ".join(map(str, hot)) if hot else "자동 분석"} / 보강 흐름은 {", ".join(map(str, overdue)) if overdue else "분산 보강"} 중심입니다.',
         f'TOP3 후보 핵심 번호는 {", ".join(map(str, top_nums[:8])) if top_nums else "생성 결과 기준 자동 산출"}이며 평균 AI 점수는 {avg}점입니다.',
         '페어·트리플 출현, AC값, 끝수, 구간, 홀짝, 조합 간 중복을 동시에 제한했습니다.',
-        '본 추천은 통계 기반 참고자료이며 당첨을 보장하지 않습니다.'
+        ''
     ]
     return '\n'.join(lines)
 
@@ -6102,7 +6096,7 @@ def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
         f'핵심 흐름 {", ".join(map(str, hot)) if hot else "자동 분석"} / 보강 흐름 {", ".join(map(str, overdue)) if overdue else "분산 보강"} 기준입니다.',
         f'TOP3 핵심 후보 번호는 {", ".join(map(str, top_nums[:8])) if top_nums else "생성 결과 기준 자동 산출"}이며 평균 AI 점수는 {avg}점입니다.',
         '끝수 5개 이상 분산, 연속수 1쌍 이하, AC값 6~11, 조합 간 중복 제한을 적용했습니다.',
-        '본 추천은 통계 기반 참고자료이며 당첨을 보장하지 않습니다.'
+        ''
     ]
     return '\n'.join(lines)
 
@@ -6794,7 +6788,6 @@ def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
         '단순 빈도보다 번호 간 균형과 최근 흐름을 함께 본 추천입니다.',
         '최근 데이터와 누적 통계를 함께 고려한 심층 추천 결과입니다.',
         '안정성과 변화 가능성을 동시에 반영한 구성입니다.',
-        '본 추천은 통계 기반 참고자료이며 당첨을 보장하지 않습니다.',
     ]
     lines = [pick(openers,1), pick(middles,7), pick(balances,13), pick(closers,19)]
     clean=[]
@@ -7588,3 +7581,50 @@ try:
         return {'ok': bool(cache.get('is_full_history')), 'message': sync_result.get('message') or ('전체 저장/분석 완료' if cache.get('is_full_history') else '전체 분석 미완료'), 'sync_result': sync_result, 'cache': cache}
 except Exception as _bb_v6_ui_sync_error:
     print('[BBLOTTO] AI V6 admin UI sync endpoint failed:', _bb_v6_ui_sync_error)
+
+
+# ===================== RC8.15 EXPERT ANALYSIS SUMMARY =====================
+def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
+    """Return a concise 3-5 line expert summary based on actual engine statistics."""
+    details = details or []
+    combos = [d.get('numbers') or [] for d in details]
+    flat = [int(n) for combo in combos for n in combo if str(n).isdigit()]
+    scores = [float(d.get('score') or d.get('ai_score') or d.get('vip_score') or 0) for d in details]
+    hot = [int(x) for x in (st.get('hot300') or st.get('hot100') or st.get('hot') or [])[:6]]
+    overdue = [int(x) for x in (st.get('overdue300') or st.get('overdue100') or st.get('overdue') or [])[:6]]
+    pairs = st.get('top_pairs') or st.get('pairs') or []
+    latest_round = int(st.get('latest_round') or st.get('target_round') or max(0, int(round_no or 1)-1))
+    actual_count = int(st.get('actual_count') or st.get('draw_count') or st.get('history_count') or latest_round or 0)
+    odd = sum(1 for n in flat if n % 2)
+    even = len(flat) - odd
+    low = sum(1 for n in flat if 1 <= n <= 15)
+    mid = sum(1 for n in flat if 16 <= n <= 30)
+    high = sum(1 for n in flat if 31 <= n <= 45)
+    avg_score = round(sum(scores) / len(scores), 1) if scores else 0
+    mode_name = {'balanced':'균형형','aggressive':'공격형','conservative':'안정형'}.get(mode, '균형형')
+    hot_text = ', '.join(map(str, hot[:5])) if hot else '최근 강세 후보군'
+    overdue_text = ', '.join(map(str, overdue[:5])) if overdue else '장기 보강 후보군'
+    pair_text = ''
+    if pairs:
+        p = pairs[0]
+        if isinstance(p, dict):
+            a, b = p.get('a') or p.get('n1'), p.get('b') or p.get('n2')
+            if a and b: pair_text = f'{a}-{b}'
+        elif isinstance(p, (list, tuple)) and len(p) >= 2:
+            pair_text = f'{p[0]}-{p[1]}'
+    lines = [
+        f'{actual_count or latest_round}개 누적 회차와 최근 흐름을 교차 분석한 결과, {hot_text} 번호군의 상승 탄력이 상대적으로 강하게 나타났습니다.',
+        f'{overdue_text} 후보는 미출현 간격과 재진입 주기를 함께 검토해 강세 번호와 혼합 배치했습니다.',
+    ]
+    if flat:
+        lines.append(f'{mode_name} 기준 전체 홀짝은 {odd}:{even}, 저·중·고 구간은 {low}/{mid}/{high}로 맞춰 특정 구간 편중을 낮췄습니다.')
+    else:
+        lines.append(f'{mode_name} 기준으로 홀짝·구간·끝수 분포와 번호 간격을 동시에 점검해 균형형 후보를 우선 선별했습니다.')
+    if pair_text:
+        lines.append(f'동반출현 흐름에서는 {pair_text} 연계성을 참고하고, 끝수 반복·연속수·AC값이 과도한 조합은 제외했습니다.')
+    else:
+        lines.append('동반출현, 끝수 반복, 연속수와 AC값을 함께 검증해 형태가 유사한 조합은 후순위로 제외했습니다.')
+    if avg_score:
+        lines.append(f'최종 조합 평균 분석점수는 {avg_score}점으로, 누적 안정성과 최근 변화 가능성이 함께 유지되는 조합을 선정했습니다.')
+    return '\n'.join(lines[:5])
+# ===================== /RC8.15 EXPERT ANALYSIS SUMMARY =====================

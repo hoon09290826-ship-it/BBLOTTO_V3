@@ -29,5 +29,5 @@ def make_sms(round_no, sets, analysis, greeting, member_name=""):
     lines = [greeting.strip() or name_line, '', f'{round_no}회 추천번호 전달드립니다.', '']
     for i, s in enumerate(sets, 1):
         lines.append(f'{i}. ' + ' / '.join(map(str, s)))
-    lines += ['', '[이번 회차 분석]', analysis, '', '본 자료는 통계 기반 참고자료이며 당첨을 보장하지 않습니다.', '좋은 결과 있으시길 바랍니다.']
+    lines += ['', '[이번 회차 분석]', analysis, '', '', '좋은 결과 있으시길 바랍니다.']
     return '\n'.join(lines)

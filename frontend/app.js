@@ -1901,7 +1901,7 @@ function buildSmsGandaPasteTemplate(){
   const numbers = formatComboLines(combos);
   const analysis = normalizeSmsLineBreaks(currentAnalysis || '').trim() || `${round}회차는 균형형 기준으로 최근 흐름과 누적 데이터를 함께 비교했습니다.
 끝수 반복과 연속수 과다 사용을 제한해 조합별 형태가 겹치지 않게 했습니다.
-본 추천은 통계 기반 참고자료이며 당첨을 보장하지 않습니다.`;
+`;
   return normalizeSmsLineBreaks([
     '안녕하세요 [*이름*]님, BBLOTTO입니다.',
     `${round}회차 추천번호 및 이번회차 분석입니다.`,
@@ -2405,7 +2405,7 @@ function rc71MemberAnalysis(member, combos, index){
     `단순 빈도보다 번호 간 균형과 최근 흐름을 함께 본 추천입니다.`,
     `최근 데이터와 누적 통계를 함께 고려한 심층 추천 결과입니다.`,
     `안정성과 변화 가능성을 함께 반영한 회원별 추천입니다.`,
-    `본 추천은 통계 기반 참고자료이며 당첨을 보장하지 않습니다.`
+    ``
   ];
   return [pick(openers,1), pick(middles,7), pick(middles,13), pick(closers,19)].filter((v,i,a)=>v && a.indexOf(v)===i).slice(0,4).join('\n');
 }
