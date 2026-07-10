@@ -391,11 +391,11 @@ def latest_stats(limit: int = 0) -> Dict[str, Any]:
         "actual_count": c.get("actual_count", 0),
         "analysis_confirm": c.get("analysis_confirm"),
         "draws": draws,
-        "freq": freq100 or freq_all,
+        "freq": freq_all,
         "freq10": freq10,
         "freq30": freq30,
         "freq50": {int(k): int(v) for k, v in (c.get("frequency50") or {}).items()},
-        "freq100": freq100 or freq_all,
+        "freq100": freq100,
         "last_seen": {int(k): int(v) for k, v in (c.get("gap") or {}).items()},
         "hot": c.get("hot", [])[:12],
         "mid": c.get("mid", [])[:15],
@@ -504,7 +504,7 @@ def _valid(nums: Sequence[int]) -> bool:
     if sig["odd"] not in (2, 3, 4): return False
     if max(sig["zones"]) > 4 or min(sig["zones"]) == 0: return False
     if sig["sum"] < 85 or sig["sum"] > 200: return False
-    if sig["cons"] > 2: return False
+    if sig["cons"] > 1: return False
     if sig["end_dup"] > 3: return False
     return True
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bblotto-rc7-8';
+const CACHE_NAME = 'bblotto-rc8-13';
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => self.clients.claim()));

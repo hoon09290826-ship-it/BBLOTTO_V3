@@ -565,6 +565,7 @@ function saveMemberFilterState(){
       status: $('memberStatusFilter')?.value || '',
       grade: $('memberGradeFilter')?.value || '',
       priority: $('memberPriorityFilter')?.value || '',
+      admin: $('memberAdminFilter')?.value || '',
       sort: $('memberSort')?.value || 'priority',
       pageSize: memberPageSize
     }));
@@ -577,6 +578,7 @@ function restoreMemberFilterState(){
     if($('memberStatusFilter')) $('memberStatusFilter').value = st.status || '';
     if($('memberGradeFilter')) $('memberGradeFilter').value = st.grade || '';
     if($('memberPriorityFilter')) $('memberPriorityFilter').value = st.priority || '';
+    if($('memberAdminFilter')) $('memberAdminFilter').value = st.admin || '';
     if($('memberSort')) $('memberSort').value = st.sort || 'priority';
     if(st.pageSize) memberPageSize = Number(st.pageSize) || 10;
   }catch(e){}
@@ -591,12 +593,20 @@ function applyMemberFilters(){
   const status=$('memberStatusFilter')?.value||'';
   const grade=$('memberGradeFilter')?.value||'';
   const priority=$('memberPriorityFilter')?.value||'';
+  const adminFilter=$('memberAdminFilter')?.value||'';
   const sort=$('memberSort')?.value||'priority';
   let list = Array.isArray(membersCache) ? [...membersCache] : [];
   if(q) list = list.filter(m => memberMatchesSearch(m, q));
   if(status) list = list.filter(m => String(m.status||'활성') === status);
   if(grade) list = list.filter(m => memberGradeLabel(m.grade) === grade || String(m.grade||'') === grade);
   if(priority) list = list.filter(m => String(m.priority||'보통') === priority);
+  if(adminFilter){
+    list = list.filter(m => {
+      const ownerId=String(m.created_by ?? m.registered_by ?? m.admin_id ?? '');
+      const ownerName=normalizeSearchText(m.registered_by_name || m.created_by_name || m.registered_by_username || m.admin_name || '');
+      return ownerId===String(adminFilter) || ownerName===normalizeSearchText(adminFilter);
+    });
+  }
   const pri = {'최우선':0,'높음':1,'보통':2,'낮음':3};
   list.sort((a,b)=>{
     if(sort==='name') return String(a.name||'').localeCompare(String(b.name||''),'ko');
@@ -609,7 +619,7 @@ function applyMemberFilters(){
   const st = ensureMemberSearchStatus();
   if(st){
     const rawQ = $('memberSearch')?.value || '';
-    const activeFilters = [rawQ && `검색어 "${rawQ}"`, status && `상태 ${status}`, grade && `등급 ${grade}`, priority && `우선순위 ${priority}`].filter(Boolean);
+    const activeFilters = [rawQ && `검색어 "${rawQ}"`, status && `상태 ${status}`, grade && `등급 ${grade}`, priority && `우선순위 ${priority}`, adminFilter && `등록관리자 ${$('memberAdminFilter')?.selectedOptions?.[0]?.textContent || adminFilter}`].filter(Boolean);
     const maxPageText = Math.max(1, Math.ceil(list.length / memberPageSize));
     st.textContent = activeFilters.length ? `검색 결과 ${list.length.toLocaleString()}명 · ${activeFilters.join(' · ')} · ${memberPage}/${maxPageText}페이지` : `전체 회원 ${list.length.toLocaleString()}명 · ${memberPage}/${maxPageText}페이지`;
   }
@@ -671,6 +681,20 @@ function fillMemberSelect(list){
   if(prev && Array.from(sel.options).some(o=>String(o.value)===prev)) sel.value=prev;
 }
 
+function refreshMemberAdminFilter(){
+  const sel=$('memberAdminFilter'); if(!sel) return;
+  const prev=String(sel.value||'');
+  const map=new Map();
+  (Array.isArray(adminCache)?adminCache:[]).forEach(a=>{ if(a?.id) map.set(String(a.id), a.name||a.username||'관리자'); });
+  (Array.isArray(membersCache)?membersCache:[]).forEach(m=>{
+    const id=String(m.created_by ?? m.registered_by ?? m.admin_id ?? '');
+    const name=m.registered_by_name || m.created_by_name || m.registered_by_username || m.admin_name || '';
+    if(id && name) map.set(id,name);
+  });
+  sel.innerHTML='<option value="">전체 등록관리자</option>'+Array.from(map.entries()).sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'ko')).map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('');
+  if(prev && Array.from(sel.options).some(o=>String(o.value)===prev)) sel.value=prev;
+}
+
 async function loadMembers(){
   restoreMemberFilterState();
   const params = new URLSearchParams();
@@ -680,6 +704,7 @@ async function loadMembers(){
   // 서버에는 권한 범위만 맡기고, 검색/필터/페이지는 전체 목록 기준으로 프론트에서 처리합니다.
   membersCache = await api('/api/members' + (params.toString() ? '?'+params.toString() : ''));
   refreshMemberAdminSelect();
+  refreshMemberAdminFilter();
   applyMemberFilters();
   renderMembers(memberFilteredCache); fillMemberSelect(membersCache); refreshSmsScopeInfo();
   setText('memberActive', membersCache.filter(m=>(m.status||'활성')==='활성').length);
@@ -1161,9 +1186,19 @@ function renderAiV6CacheStatus(d){
 }
 
 async function checkAiV6CacheStatus(){
-  const d = await api('/api/admin/ai-v6/cache-status?target_round=1231');
-  renderAiV6CacheStatus(d);
-  return d;
+  setBusy('checkAiV6Cache', true, '확인 중...');
+  setText('aiV6CacheBadge','확인 중');
+  try{
+    let d;
+    try{ d = await api('/api/admin/ai-v6/cache-status?target_round=1231'); }
+    catch(firstError){
+      console.warn('관리자 캐시 상태 API 재시도', firstError);
+      d = await api('/api/ai-engine/v6-cache?target_round=1231');
+    }
+    renderAiV6CacheStatus(d);
+    toast(`캐시 확인 완료: ${Number(d.actual_count||d.draw_count||0)}/${Number(d.expected_count||1231)}회`);
+    return d;
+  }finally{ setBusy('checkAiV6Cache', false); }
 }
 
 async function syncAiV6FullHistory(){
@@ -1324,9 +1359,14 @@ window.generateMemberAndCopy = safe(async function(id, btn){
     window.selectMember(id);
     setGenCountValue(getMemberPreferredCount(m));
     await generate();
+    const expected=getMemberPreferredCount(m);
+    if(normalizeCombos(currentCombos).length!==expected) throw new Error(`추천번호 ${expected}조합 생성 확인에 실패했습니다.`);
+    if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
+    openPanel('generator','추천번호 생성');
     const text = ($('smsPreview')?.value || currentSms || '').trim();
     await copyTextToClipboard(text);
-    toast(`${m.name} ${getMemberPreferredCount(m)}조합 생성 후 문자내용 복사 완료`);
+    setTimeout(()=>document.getElementById('comboList')?.scrollIntoView({behavior:'smooth',block:'start'}),80);
+    toast(`${m.name} ${expected}조합 + 분석요약 생성 및 문자 복사 완료`);
     if(btn) btn.textContent='복사완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || `${getMemberPreferredCount(m)}조합`; btn.disabled=false; } }, 1200);
   }catch(e){
@@ -1345,6 +1385,10 @@ window.generateMemberCopyAndSave = safe(async function(id, btn){
     window.selectMember(id);
     setGenCountValue(getMemberPreferredCount(m));
     await generate();
+    const expected=getMemberPreferredCount(m);
+    if(normalizeCombos(currentCombos).length!==expected) throw new Error(`추천번호 ${expected}조합 생성 확인에 실패했습니다.`);
+    if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
+    openPanel('generator','추천번호 생성');
     const text = ($('smsPreview')?.value || currentSms || '').trim();
     await copyTextToClipboard(text);
     await saveCurrentSmsLog();
@@ -1459,10 +1503,12 @@ async function generate(){
     const d=await api('/api/generate',{method:'POST',body});
     currentRecId=d.id||null;
     currentCombos=normalizeCombos(d.sets||d.combos||d.numbers||[]);
+    if(!currentCombos.length) throw new Error('추천번호 API가 조합을 반환하지 않았습니다.');
+    if(currentCombos.length !== Number(body.count)) console.warn('요청 조합수와 생성 조합수가 다릅니다.', body.count, currentCombos.length);
     currentDetails=d.details||[];
     currentRound=d.round||d.round_no||body.round_no||'';
     const fallback = buildFallbackAnalysis(currentCombos, latestStatsCache, body.mode);
-    currentAnalysis=normalizeText(d.analysis||d.ai_analysis||d.engine?.summary||fallback);
+    currentAnalysis=normalizeText(d.analysis||d.ai_analysis||d.engine?.summary||fallback).trim() || fallback;
     currentSms=normalizeText(d.sms||'') || buildTemplateMessage(getSelectedMember(), currentRound, currentCombos, currentAnalysis);
     setText('roundLabel', currentRound ? `${currentRound}회차 추천번호 · 심층분석 완료` : '생성 완료');
     renderCombos(currentCombos,currentDetails);
@@ -2155,6 +2201,7 @@ function bind(){
   $('memberStatusFilter')?.addEventListener('change',()=>{ saveMemberFilterState(); refreshMemberView(); });
   $('memberGradeFilter')?.addEventListener('change',()=>{ saveMemberFilterState(); refreshMemberView(); });
   $('memberPriorityFilter')?.addEventListener('change',()=>{ saveMemberFilterState(); refreshMemberView(); });
+  $('memberAdminFilter')?.addEventListener('change',()=>{ saveMemberFilterState(); refreshMemberView(); });
   $('memberSort')?.addEventListener('change',()=>{ memberPage=1; saveMemberFilterState(); applyMemberFilters(); renderMembers(memberFilteredCache); });
   $('genMember')?.addEventListener('change',()=>{ applySelectedMemberPreferredCount(); refreshSmsPreview(); });
   $('saveTemplate')?.addEventListener('click',safe(saveTemplate));
@@ -2417,10 +2464,4 @@ async function loadOpsHealth(){
 setTimeout(()=>{ if(typeof token==='function' && token()) loadOpsHealth(); }, 1200);
 
 
-(function bindAiV6AdminButtons(){
-  const bind=()=>{
-    const a=document.getElementById('checkAiV6Cache'); if(a && !a.dataset.bound){ a.dataset.bound='1'; a.addEventListener('click', window.checkAiV6CacheStatus); }
-    const b=document.getElementById('syncAiV6FullHistory'); if(b && !b.dataset.bound){ b.dataset.bound='1'; b.addEventListener('click', window.syncAiV6FullHistory); }
-  };
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', bind); else bind();
-})();
+
