@@ -271,3 +271,9 @@ button{background:#151515;border:1px solid rgba(212,175,55,.35);border-radius:10
   font-size:12px;
   flex:0 0 auto;
 }
+
+/* RC8-12 전체회차 통계 강조 */
+.full-history-status{border:1px solid rgba(218,175,45,.55);background:linear-gradient(135deg,rgba(218,175,45,.10),rgba(255,255,255,.02));}
+.history-range{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0 10px;}
+.history-range b{font-size:20px;color:#f0c94a;}
+.history-range span{font-weight:700;color:#fff;}

@@ -341,7 +341,8 @@ def latest_stats(limit: int = 0) -> Dict[str, Any]:
     """기존 /api/stats 및 추천 엔진과 호환되는 V6 통계 응답을 반환한다."""
     c = get_analysis_cache(False)
     raw_draws = _load_draws()
-    take = max(10, int(limit or 100))
+    requested = int(limit or 0)
+    take = len(raw_draws) if requested <= 0 else max(10, requested)
     selected = raw_draws[:take]
     draws = [
         {
@@ -544,27 +545,57 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     details: List[Dict[str, Any]] = []
     usage = Counter()
     pair_usage = Counter()
-    for score, nums, reasons, sig in candidates:
-        s = set(nums)
-        if any(len(s & set(prev)) >= 5 for prev in selected):
-            continue
-        if any(usage[n] >= max(3, count // 3 + 1) for n in nums):
-            continue
-        pairs = [tuple(sorted(p)) for p in itertools.combinations(nums, 2)]
-        if any(pair_usage[p] >= 2 for p in pairs):
-            continue
+    max_number_use = max(2, min(3, (count * 6 + 29) // 30))
+
+    # 점수만 높은 비슷한 조합이 반복되지 않도록 다양성 보정(MMR 방식)으로 선별한다.
+    remaining = candidates[:]
+    while remaining and len(selected) < count:
+        best_index = -1
+        best_adjusted = float('-inf')
+        for idx, (score, nums, reasons, sig) in enumerate(remaining):
+            s_nums = set(nums)
+            overlaps = [len(s_nums & set(prev)) for prev in selected]
+            max_overlap = max(overlaps, default=0)
+            if max_overlap >= 4:
+                continue
+            if any(usage[n] >= max_number_use for n in nums):
+                continue
+            pairs = [tuple(sorted(p)) for p in itertools.combinations(nums, 2)]
+            repeated_pairs = sum(pair_usage[p] for p in pairs)
+            usage_penalty = sum(usage[n] for n in nums)
+            overlap_penalty = sum(v * v for v in overlaps)
+            adjusted = float(score) - overlap_penalty * 1.8 - usage_penalty * 1.25 - repeated_pairs * 2.0
+            if adjusted > best_adjusted:
+                best_adjusted = adjusted
+                best_index = idx
+        if best_index < 0:
+            # 조건이 너무 엄격해도 5개 이상 동일한 조합은 허용하지 않는다.
+            for idx, (score, nums, reasons, sig) in enumerate(remaining):
+                s_nums = set(nums)
+                if any(len(s_nums & set(prev)) >= 5 for prev in selected):
+                    continue
+                usage_penalty = sum(usage[n] for n in nums)
+                adjusted = float(score) - usage_penalty * 2.0
+                if adjusted > best_adjusted:
+                    best_adjusted = adjusted
+                    best_index = idx
+        if best_index < 0:
+            break
+        score, nums, reasons, sig = remaining.pop(best_index)
         selected.append(nums)
         usage.update(nums)
-        pair_usage.update(pairs)
+        pair_usage.update(tuple(sorted(p)) for p in itertools.combinations(nums, 2))
         details.append({"numbers": nums, "score": score, "ai_score": score, "vip_score": score, "grade": "VIP" if score >= 95 else "PREMIUM" if score >= 91 else "NORMAL", "member_grade": grade, "reason": " / ".join(reasons), "reasons": reasons, "sum": sig["sum"], "odd": sig["odd"], "even": sig["even"], "ac": sig["ac"], "zones": sig["zones"], "engine": ENGINE_VERSION})
-        if len(selected) >= count:
-            break
 
-    for score, nums, reasons, sig in candidates:
-        if len(selected) >= count:
-            break
-        if nums not in selected:
+    # 극단적인 경우에만 안전한 보충 조합을 넣되, 5개 이상 중복은 끝까지 금지한다.
+    if len(selected) < count:
+        for score, nums, reasons, sig in candidates:
+            if len(selected) >= count:
+                break
+            if nums in selected or any(len(set(nums) & set(prev)) >= 5 for prev in selected):
+                continue
             selected.append(nums)
+            usage.update(nums)
             details.append({"numbers": nums, "score": score, "ai_score": score, "vip_score": score, "grade": "NORMAL", "member_grade": grade, "reason": " / ".join(reasons), "reasons": reasons, "sum": sig["sum"], "odd": sig["odd"], "even": sig["even"], "ac": sig["ac"], "zones": sig["zones"], "engine": ENGINE_VERSION})
 
     st = latest_stats()

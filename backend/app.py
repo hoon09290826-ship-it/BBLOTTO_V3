@@ -3158,7 +3158,7 @@ def api_stats(limit:int=100, authorization: str|None = Header(default=None)):
         'display_count': len(draws),
         'limit': limit,
         'latest': draws[0] if draws else None,
-        'recent_draws': draws[:100],
+        'recent_draws': draws if int(limit) <= 0 else draws[:max(100, int(limit))],
         'hot': st.get('hot', []),
         'cold': st.get('cold', []),
         'missing20': st.get('overdue', []),

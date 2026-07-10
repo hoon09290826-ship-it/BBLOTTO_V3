@@ -774,7 +774,7 @@ function renderStats(d){
   const cold=(d.cold||[]).map(n=>`<span class="ball ${ballClass(n)}">${n}</span>`).join('');
   const miss=(d.missing20||d.overdue||[]).map(n=>`<span class="ball ${ballClass(n)}">${n}</span>`).join('');
   const pairs=(d.top_pairs||[]).map(p=>`<span class="mini-chip">${(p.pair||[]).join('-')} · ${p.count}회</span>`).join('');
-  statsRecentDrawsCache=(d.recent_draws||[]).slice(0,100);
+  statsRecentDrawsCache=(d.recent_draws||[]);
   const freq=d.freq || d.freq100 || {};
   const maxFreq=Math.max(1, ...Object.values(freq).map(Number));
   const bars=Object.entries(freq).sort((a,b)=>Number(b[1])-Number(a[1])).slice(0,15).map(([n,c])=>`<div class="stats-bar"><b>${n}</b><div><i style="width:${Math.round(Number(c)/maxFreq*100)}%"></i></div><span>${c}회</span></div>`).join('');
@@ -785,13 +785,13 @@ function renderStats(d){
       <div class="stat-card"><b>${d.odd}:${d.even}</b><span>홀짝 누적</span></div>
       <div class="stat-card"><b>${(d.sections||[]).join(' / ')}</b><span>구간 1~15 / 16~30 / 31~45</span></div>
     </div>
-    <div class="detail-section"><h4>분석 엔진 상태</h4><div class="hint">${d.analysis_confirm||'분석 상태 확인 중'} · 범위 ${(d.round_range||[]).join('~')||'-'} · 누락 ${d.missing_rounds_count||0}개 · 전체분석 ${d.is_full_history?'완료':'미완료'}</div></div>
+    <div class="detail-section full-history-status"><h4>전체 회차 분석 상태</h4><div class="history-range"><b>${(d.round_range||[])[0]||1}회차부터 ${(d.round_range||[])[1]||d.latest_round||'-'}회차까지</b><span>총 ${d.count||0}개 회차 분석</span></div><div class="hint">${d.analysis_confirm||'분석 상태 확인 중'} · 누락 ${d.missing_rounds_count||0}개 · 전체분석 ${d.is_full_history?'완료':'미완료'}</div></div>
     <div class="stats-panels">
       <div class="detail-section"><h4>HOT 번호</h4><div class="nums-line">${hot}</div><h4>COLD 번호</h4><div class="nums-line">${cold}</div><h4>미출현/공백 번호</h4><div class="nums-line">${miss}</div></div>
       <div class="detail-section"><h4>번호 발생 빈도 TOP 15</h4><div class="stats-bars">${bars||'데이터 없음'}</div></div>
     </div>
     <div class="detail-section"><h4>동반출현 TOP</h4><div class="pair-line">${pairs||'데이터 없음'}</div></div>
-    <div class="detail-section"><h4>최근 회차</h4><div id="statsRecentDraws" class="recent-draws-100"></div><div id="statsPager" class="pager"></div></div>
+    <div class="detail-section"><h4>회차별 당첨번호 · 1회차부터 현재까지 페이지로 확인</h4><div id="statsRecentDraws" class="recent-draws-100"></div><div id="statsPager" class="pager"></div></div>
   </div>`;
   renderStatsRecentDraws();
 }
