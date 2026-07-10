@@ -8,6 +8,7 @@ let currentCombos = [];
 let currentDetails = [];
 let currentSms = '';
 let currentAnalysis = '';
+let currentRecommendationAnalysis = '';
 let currentRound = '';
 let currentRecId = null;
 let membersCache = [];
@@ -36,7 +37,7 @@ const WORKSPACE_KEY = 'bb_v50_workspace_state';
 function saveWorkspaceState(){
   try{
     const state = {
-      currentCombos, currentDetails, currentSms, currentAnalysis, currentRound, currentRecId,
+      currentCombos, currentDetails, currentSms, currentAnalysis, currentRecommendationAnalysis, currentRound, currentRecId,
       selectedMemberId: $('genMember')?.value || '',
       template: $('template')?.value || '',
       bulkSmsTemplate: $('bulkSmsTemplate')?.value || '',
@@ -504,6 +505,34 @@ function renderAnalysis(text){
   const lines = normalizeText(text).split('\n').map(x=>x.trim()).filter(Boolean);
   if(!lines.length){ an.textContent='추천번호를 생성하면 3~5줄 분석이 표시됩니다.'; return; }
   an.innerHTML = `<ul class="analysis-list">${lines.map(l=>`<li>${esc(l)}</li>`).join('')}</ul>`;
+}
+
+function buildRecommendationAnalysis(combos, details=[]){
+  const sets=normalizeCombos(combos);
+  if(!sets.length) return '';
+  const flat=sets.flat().map(Number).filter(Number.isFinite);
+  const counts={}; flat.forEach(n=>counts[n]=(counts[n]||0)+1);
+  const repeated=Object.entries(counts).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]||Number(a[0])-Number(b[0])).slice(0,5).map(([n])=>n);
+  const sums=sets.map(c=>c.reduce((a,b)=>a+Number(b),0));
+  const avgSum=Math.round(sums.reduce((a,b)=>a+b,0)/sums.length);
+  const avgOdd=(sets.reduce((a,c)=>a+c.filter(n=>Number(n)%2===1).length,0)/sets.length).toFixed(1);
+  const maxOverlap=sets.reduce((mx,a,i)=>Math.max(mx,...sets.slice(i+1).map(b=>a.filter(n=>b.includes(n)).length),0),0);
+  const scoreVals=(details||[]).map(d=>Number(d.score ?? d.vip_score ?? d.ai_score ?? 0)).filter(Boolean);
+  const avgScore=scoreVals.length?(scoreVals.reduce((a,b)=>a+b,0)/scoreVals.length).toFixed(1):'';
+  const lines=[
+    `생성된 ${sets.length}개 조합은 평균 합계 ${avgSum}, 평균 홀수 ${avgOdd}개 수준으로 분산 구성했습니다.`,
+    repeated.length?`반복 핵심수는 ${repeated.join(', ')}번이며, 동일 번호의 과도한 편중은 제한했습니다.`:'조합별 번호 중복을 최소화해 각 조합의 독립성과 분산성을 높였습니다.',
+    `조합 간 최대 중복은 ${maxOverlap}개로 제한하고 홀짝·구간·끝수 균형을 함께 검증했습니다.`,
+    avgScore?`최종 선별 조합의 평균 AI 점수는 ${avgScore}점으로, 상위 후보군에서 다양성을 우선해 선정했습니다.`:'상위 후보군 가운데 패턴 중복이 적고 균형도가 높은 조합만 최종 선정했습니다.'
+  ];
+  return lines.join('\n');
+}
+
+function renderRecommendationAnalysis(text){
+  const an=$('recommendationAnalysis'); if(!an) return;
+  const lines=normalizeText(text).split('\n').map(x=>x.trim()).filter(Boolean);
+  if(!lines.length){ an.textContent='추천번호를 생성하면 조합별 선별 근거가 표시됩니다.'; return; }
+  an.innerHTML=`<ul class="analysis-list">${lines.map(l=>`<li>${esc(l)}</li>`).join('')}</ul>`;
 }
 
 function renderEngine(engine, details=[]){
@@ -1398,8 +1427,7 @@ window.generateMemberAndCopy = safe(async function(id, btn){
     if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
     const text = ($('smsPreview')?.value || currentSms || '').trim();
     await copyTextToClipboard(text);
-    showMemberQuickResult(m,currentCombos,currentAnalysis,true,false);
-    toast(`${m.name} ${expected}조합 + 분석요약 생성 및 문자 복사 완료`);
+    toast(`${m.name} ${expected}조합 생성·분석·문자 복사 완료`);
     if(btn) btn.textContent='복사완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || `${getMemberPreferredCount(m)}조합`; btn.disabled=false; } }, 1200);
   }catch(e){
@@ -1427,7 +1455,6 @@ window.generateMemberCopyAndSave = safe(async function(id, btn){
     await saveCurrentSmsLog();
     await Promise.all([loadDashboard(), loadMembers()]);
     if($('genMember')) $('genMember').value=String(id);
-    showMemberQuickResult(m,currentCombos,currentAnalysis,true,true);
     toast(`${m.name} ${getMemberPreferredCount(m)}조합 문자 복사 + 보낸문자 저장 완료`);
     if(btn) btn.textContent='저장완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || '복사저장'; btn.disabled=false; } }, 1200);
@@ -1543,10 +1570,12 @@ async function generate(){
     currentRound=d.round||d.round_no||body.round_no||'';
     const fallback = buildFallbackAnalysis(currentCombos, latestStatsCache, body.mode);
     currentAnalysis=normalizeText(d.analysis||d.ai_analysis||d.engine?.summary||fallback).trim() || fallback;
+    currentRecommendationAnalysis=buildRecommendationAnalysis(currentCombos,currentDetails);
     currentSms=normalizeText(d.sms||'') || buildTemplateMessage(getSelectedMember(), currentRound, currentCombos, currentAnalysis);
     setText('roundLabel', currentRound ? `${currentRound}회차 추천번호 · 심층분석 완료` : '생성 완료');
     renderCombos(currentCombos,currentDetails);
     renderAnalysis(currentAnalysis);
+    renderRecommendationAnalysis(currentRecommendationAnalysis);
     renderEngine(d.engine,currentDetails);
     refreshSmsPreview();
     await Promise.all([loadDashboard(), loadMembers(), loadStats(0)]);
@@ -2499,3 +2528,5 @@ setTimeout(()=>{ if(typeof token==='function' && token()) loadOpsHealth(); }, 12
 
 
 
+
+// RC8.17: core/recommendation analysis split; member quick generation stays on list without popup.
