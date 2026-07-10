@@ -770,7 +770,7 @@ async function rc44RunAutoUpdate(){
   try{
     const d=await api('/api/rc4-4/auto-update?backfill=12',{method:'POST'});
     if(box) box.innerHTML=`<h3>자동 업데이트 결과</h3>${(d.steps||[]).map(s=>`<div class="rc44-step"><b>${esc(s.name)}</b><span class="${s.ok?'ok':'fail'}">${s.ok?'완료':'실패'}</span></div>`).join('')}<p class="hint">성공 ${d.success_count||0}건 / 실패 ${d.failed_count||0}건</p>`;
-    await Promise.allSettled([loadDashboard(), loadStats(100), loadDraws(), loadMembers()]);
+    await Promise.allSettled([loadDashboard(), loadStats(0), loadDraws(), loadMembers()]);
     toast('RC4-4 자동 업데이트가 완료되었습니다.');
   }catch(e){ if(box) box.innerHTML=`<b>자동 업데이트 실패</b><p>${esc(e.message||e)}</p>`; }
 }
@@ -816,11 +816,11 @@ function renderStats(d){
       <div class="detail-section"><h4>번호 발생 빈도 TOP 15</h4><div class="stats-bars">${bars||'데이터 없음'}</div></div>
     </div>
     <div class="detail-section"><h4>동반출현 TOP</h4><div class="pair-line">${pairs||'데이터 없음'}</div></div>
-    <div class="detail-section"><h4>회차별 당첨번호 · 1회차부터 현재까지 페이지로 확인</h4><div id="statsRecentDraws" class="recent-draws-100"></div><div id="statsPager" class="pager"></div></div>
+    <div class="detail-section"><h4>회차별 당첨번호 · 전체 ${(d.count||0).toLocaleString()}회차를 페이지로 확인</h4><div id="statsRecentDraws" class="recent-draws-100"></div><div id="statsPager" class="pager"></div></div>
   </div>`;
   renderStatsRecentDraws();
 }
-async function loadStats(limit=100){
+async function loadStats(limit=0){
   const d=await api('/api/stats?limit='+limit);
   renderStats(d);
   const live = buildRealtimeRoundAnalysis(d);
@@ -1486,7 +1486,7 @@ async function generate(){
   const selectedMemberId=$('genMember')?.value||'';
   applySelectedMemberPreferredCount();
   const next=await setNextDrawRound();
-  try{ await loadStats(100); }catch(e){ console.warn('최신 통계 갱신 실패', e); }
+  try{ await loadStats(0); }catch(e){ console.warn('최신 통계 갱신 실패', e); }
   const defaultRound = Number(next?.next_round || next?.latest_round || 0) || undefined;
   const body={
     member_id:selectedMemberId ? Number(selectedMemberId) : null,
@@ -1515,7 +1515,7 @@ async function generate(){
     renderAnalysis(currentAnalysis);
     renderEngine(d.engine,currentDetails);
     refreshSmsPreview();
-    await Promise.all([loadDashboard(), loadMembers(), loadStats(100)]);
+    await Promise.all([loadDashboard(), loadMembers(), loadStats(0)]);
     if(selectedMemberId && $('genMember')) $('genMember').value=selectedMemberId;
     refreshSmsPreview();
     scrollToMessagePanel();
@@ -1977,7 +1977,7 @@ async function searchDrawByRound(){
     const d=await api('/api/draws/search?round_no='+encodeURIComponent(r));
     lastSearchedDraw=d && d.ok ? d : null;
     renderDrawSearchResult(d);
-    if(d && d.ok){ await Promise.allSettled([loadDraws(), loadStats(100), loadDashboard()]); }
+    if(d && d.ok){ await Promise.allSettled([loadDraws(), loadStats(0), loadDashboard()]); }
   }catch(e){
     lastSearchedDraw=null;
     renderDrawSearchResult({ok:false, round_no:r, message:e?.message || '회차 조회에 실패했습니다.'});
@@ -2004,7 +2004,7 @@ async function checkWinning(){
     if(d.wins?.length){ if($('winningNums')) $('winningNums').value=d.wins.join(' '); if($('bonusNum')) $('bonusNum').value=d.bonus||''; }
     renderWinningResult(d);
     toast('당첨번호 자동확인이 완료되었습니다.');
-    await Promise.all([loadStats(100),loadDraws(),loadDashboard(),setNextDrawRound()]);
+    await Promise.all([loadStats(0),loadDraws(),loadDashboard(),setNextDrawRound()]);
   }catch(e){
     const msg = e?.message || '당첨번호 자동확인에 실패했습니다.';
     alert(msg + '\n\n공식 조회가 막힌 경우에는 당첨번호 6개와 보너스 번호를 직접 입력한 뒤 다시 누르면 저장/확인이 가능합니다.');
@@ -2182,7 +2182,7 @@ window.editAdmin=safe(async function(id){
 function bind(){
   document.querySelectorAll('.nav').forEach(btn=>btn.addEventListener('click',()=>{
     openPanel(btn.dataset.tab, btn.textContent.trim());
-    if(btn.dataset.tab==='stats') loadStats(100).catch(console.error);
+    if(btn.dataset.tab==='stats') loadStats(0).catch(console.error);
     if(btn.dataset.tab==='account') loadMyAccount().catch(console.error);
     if(btn.dataset.tab==='admin') loadAdmin().catch(console.error);
   }));
@@ -2278,7 +2278,7 @@ function bind(){
   $('saveSessionTimeout')?.addEventListener('click',safe(saveSessionTimeout));
   $('createBackup')?.addEventListener('click',safe(createBackup));
   $('rc44AutoUpdate')?.addEventListener('click',safe(rc44RunAutoUpdate));
-  $('rc44Refresh')?.addEventListener('click',safe(async()=>{ await loadDashboard(); await loadStats(100); await loadMembers(); toast('RC4-4 화면을 새로고침했습니다.'); }));
+  $('rc44Refresh')?.addEventListener('click',safe(async()=>{ await loadDashboard(); await loadStats(0); await loadMembers(); toast('RC4-4 화면을 새로고침했습니다.'); }));
   document.querySelectorAll('.statBtn').forEach(b=>b.addEventListener('click',()=>loadStats(b.dataset.limit).catch(e=>alert(e.message))));
   $('pdfBtn')?.addEventListener('click',()=>window.print());
 }
@@ -2303,7 +2303,7 @@ async function init(){
       ['dashboard', loadDashboard()],
       ['members', loadMembers()],
       ['template', loadTemplate()],
-      ['stats', loadStats(100)],
+      ['stats', loadStats(0)],
       ['draws', loadDraws()],
       ['nextRound', setNextDrawRound()]
     ];
