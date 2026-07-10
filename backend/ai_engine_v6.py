@@ -338,7 +338,43 @@ def get_analysis_cache(force: bool = False, target_round: Optional[int] = None) 
 
 
 def latest_stats(limit: int = 0) -> Dict[str, Any]:
+    """기존 /api/stats 및 추천 엔진과 호환되는 V6 통계 응답을 반환한다."""
     c = get_analysis_cache(False)
+    raw_draws = _load_draws()
+    take = max(10, int(limit or 100))
+    selected = raw_draws[:take]
+    draws = [
+        {
+            "round_no": int(d.get("r") or 0),
+            "draw_date": str(d.get("d") or ""),
+            "numbers": list(d.get("n") or []),
+            "bonus": int(d.get("b") or 0),
+        }
+        for d in selected
+        if len(d.get("n") or []) == 6
+    ]
+
+    freq_all = {int(k): int(v) for k, v in (c.get("frequency_all") or {}).items()}
+    freq10 = {int(k): int(v) for k, v in (c.get("frequency10") or {}).items()}
+    freq30 = {int(k): int(v) for k, v in (c.get("frequency30") or {}).items()}
+    freq100 = {int(k): int(v) for k, v in (c.get("frequency100") or {}).items()}
+    pair_counts = Counter()
+    top_pairs = []
+    for item in c.get("pair_top") or []:
+        try:
+            pair, count = item
+            key = tuple(sorted(int(x) for x in pair))
+            pair_counts[key] = int(count)
+            top_pairs.append({"pair": list(key), "count": int(count)})
+        except Exception:
+            continue
+
+    zone_values = c.get("zone_counts") or [0, 0, 0]
+    zone_counts = {
+        "1~15": int(zone_values[0]) if len(zone_values) > 0 else 0,
+        "16~30": int(zone_values[1]) if len(zone_values) > 1 else 0,
+        "31~45": int(zone_values[2]) if len(zone_values) > 2 else 0,
+    }
     return {
         "engine_version": c.get("engine_version", ENGINE_VERSION),
         "cache_storage": c.get("cache_storage"),
@@ -353,14 +389,26 @@ def latest_stats(limit: int = 0) -> Dict[str, Any]:
         "expected_count": c.get("expected_count", 0),
         "actual_count": c.get("actual_count", 0),
         "analysis_confirm": c.get("analysis_confirm"),
+        "draws": draws,
+        "freq": freq100 or freq_all,
+        "freq10": freq10,
+        "freq30": freq30,
+        "freq50": {int(k): int(v) for k, v in (c.get("frequency50") or {}).items()},
+        "freq100": freq100 or freq_all,
+        "last_seen": {int(k): int(v) for k, v in (c.get("gap") or {}).items()},
         "hot": c.get("hot", [])[:12],
+        "mid": c.get("mid", [])[:15],
         "cold": c.get("cold", [])[:12],
         "overdue": c.get("overdue", [])[:12],
-        "pair_top": c.get("pair_top", [])[:10],
+        "top_pairs": top_pairs[:15],
+        "pair_counts": pair_counts,
         "avg_sum30": c.get("avg_sum30", 0),
         "avg_ac30": c.get("avg_ac30", 0),
-        "end_counts": c.get("end_counts", {}),
-        "zone_counts": c.get("zone_counts", []),
+        "sum_avg": c.get("avg_sum30", 0),
+        "end_counts": {int(k): int(v) for k, v in (c.get("end_counts") or {}).items()},
+        "zone_counts": zone_counts,
+        "odd_ratio": 0,
+        "recent_numbers": set(),
     }
 
 
