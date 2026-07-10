@@ -1166,15 +1166,25 @@ async function checkAiV6CacheStatus(){
 }
 
 async function syncAiV6FullHistory(){
-  if(!confirm('1회차~1231회차 전체 동기화/분석을 시작할까요? 처음 실행은 시간이 조금 걸릴 수 있습니다.')) return;
+  if(!confirm('1회차~1231회차 전체 동기화/분석을 시작할까요? Railway 오류 방지를 위해 나눠서 저장합니다.')) return;
   setBusy('syncAiV6FullHistory', true, '동기화/분석 중...');
   setText('aiV6CacheBadge', '진행 중');
-  setHTML('aiV6CacheStatus', '전체 회차 동기화와 분석 캐시 저장을 진행 중입니다. 잠시만 기다려주세요.');
+  setHTML('aiV6CacheStatus', '전체 회차를 나눠서 저장 중입니다. 창을 닫지 말고 기다려주세요.');
   try{
-    const d = await api('/api/admin/ai-v6/full-sync?max_round=1231', {method:'POST'});
-    renderAiV6CacheStatus(d.cache || d);
-    const done = !!(d.completed || d?.cache?.is_full_history || d?.is_full_history);
-    toast(done ? '1~1231 전체 회차 분석 저장 완료' : (d.message || '전체 분석이 아직 완료되지 않았습니다. 누락 회차를 확인하세요.'));
+    let last = null;
+    for(let i=1;i<=40;i++){
+      const d = await api('/api/admin/ai-v6/full-sync-step?max_round=1231&chunk_size=40', {method:'POST'});
+      last = d;
+      const c = d.cache || d;
+      renderAiV6CacheStatus(c);
+      const actual = Number(c.actual_count || 0);
+      const expected = Number(c.expected_count || 1231);
+      setText('aiV6CacheBadge', d.completed ? '전체 저장 완료' : `진행 중 ${actual}/${expected}`);
+      if(d.completed || c.is_full_history) break;
+      await new Promise(r=>setTimeout(r, 350));
+    }
+    const done = !!(last?.completed || last?.cache?.is_full_history || last?.is_full_history);
+    toast(done ? '1~1231 전체 회차 분석 저장 완료' : '아직 일부 회차가 남았습니다. 버튼을 한 번 더 눌러 이어서 진행하세요.');
   }finally{
     setBusy('syncAiV6FullHistory', false);
   }

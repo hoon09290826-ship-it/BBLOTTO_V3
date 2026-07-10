@@ -625,7 +625,7 @@ def sync_official_full_history(max_round: Optional[int] = DEFAULT_TARGET_ROUND, 
 
     # Railway/Render에서도 너무 오래 걸리지 않도록 동시 요청한다.
     # 환경변수 BBLOTTO_SYNC_WORKERS로 조절 가능, 기본 16개.
-    workers = max(1, min(int(os.getenv("BBLOTTO_SYNC_WORKERS", "16") or "16"), 32))
+    workers = max(1, min(int(os.getenv("BBLOTTO_SYNC_WORKERS", "6") or "6"), 10))
     if missing:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futures = {ex.submit(_official_fetch, r): r for r in missing}
@@ -685,4 +685,73 @@ def sync_official_full_history(max_round: Optional[int] = DEFAULT_TARGET_ROUND, 
         "cache_storage": "database.ai_analysis_cache",
         "engine_version": ENGINE_VERSION,
         "source": "dhlottery_official_api",
+    }
+
+
+def sync_official_history_step(max_round: int = DEFAULT_TARGET_ROUND, chunk_size: int = 40) -> Dict[str, Any]:
+    """Railway timeout 방지용 단계별 동기화.
+    한 번에 전체 1231개를 요청하지 않고 누락 회차 중 일부만 저장한 뒤
+    프론트에서 반복 호출한다.
+    """
+    target = int(max_round or DEFAULT_TARGET_ROUND)
+    chunk = max(5, min(int(chunk_size or 40), 80))
+    before = _load_draws()
+    existing = {int(d["r"]) for d in before}
+    missing = [r for r in range(MIN_REQUIRED_ROUND, target + 1) if r not in existing]
+    batch = missing[:chunk]
+    saved = 0
+    failed_rounds: List[int] = []
+
+    workers = max(1, min(int(os.getenv("BBLOTTO_SYNC_WORKERS", "5") or "5"), 8))
+    if batch:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(_official_fetch, r): r for r in batch}
+            for fut in as_completed(futures):
+                r = futures[fut]
+                try:
+                    d = fut.result()
+                except Exception:
+                    d = None
+                if d:
+                    try:
+                        _save_draw(d)
+                        saved += 1
+                        existing.add(int(d["r"]))
+                    except Exception:
+                        failed_rounds.append(r)
+                else:
+                    failed_rounds.append(r)
+
+    # 매 단계마다 가벼운 상태 확인. 마지막 또는 저장분이 있을 때 캐시 재생성.
+    remaining_est = max(0, len(missing) - len(batch) + len(failed_rounds))
+    rebuild = (remaining_est == 0) or saved > 0
+    cache = get_analysis_cache(bool(rebuild), target_round=target)
+    completed = bool(cache.get("is_full_history"))
+    total_expected = int(cache.get("expected_count") or target)
+    actual = int(cache.get("actual_count") or 0)
+    return {
+        "ok": True,
+        "completed": completed,
+        "message": (f"1회차~{target}회차 전체 저장/분석 완료" if completed else f"동기화 진행 중: {actual}/{total_expected}회차 저장"),
+        "saved": saved,
+        "processed": len(batch),
+        "failed": len(failed_rounds),
+        "failed_rounds_sample": failed_rounds[:20],
+        "remaining_count": int(cache.get("missing_rounds_count") or 0),
+        "next_missing_sample": cache.get("missing_rounds_sample"),
+        "cache": {
+            "engine_version": cache.get("engine_version"),
+            "cache_storage": cache.get("cache_storage"),
+            "analysis_confirm": cache.get("analysis_confirm"),
+            "actual_count": cache.get("actual_count"),
+            "expected_count": cache.get("expected_count"),
+            "round_range": cache.get("round_range"),
+            "latest_round": cache.get("latest_round"),
+            "target_round": cache.get("target_round"),
+            "is_full_history": cache.get("is_full_history"),
+            "missing_rounds_count": cache.get("missing_rounds_count"),
+            "missing_rounds_sample": cache.get("missing_rounds_sample"),
+        },
+        "engine_version": ENGINE_VERSION,
+        "source": "dhlottery_official_api_step_sync",
     }
