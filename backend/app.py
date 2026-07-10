@@ -3153,7 +3153,34 @@ def api_stats(limit:int=100, authorization: str|None = Header(default=None)):
     for d in draws:
         for a,b in itertools.combinations(d['numbers'],2):
             pair_counter[(a,b)]+=1
-    return {'count':len(draws),'limit':limit,'latest':draws[0] if draws else None,'recent_draws':draws[:100],'hot':st['hot'],'cold':st['cold'],'missing20':st['overdue'],'odd':odd,'even':even,'sections':sections,'sum_min':min(sums) if sums else 0,'sum_avg':round(sum(sums)/len(sums),1) if sums else 0,'sum_max':max(sums) if sums else 0,'top_pairs':[{'pair':list(k),'count':v} for k,v in pair_counter.most_common(15)], 'freq': st.get('freq',{}), 'freq100': st.get('freq100',{})}
+    return {
+        'count': int(st.get('draw_count') or len(draws)),
+        'display_count': len(draws),
+        'limit': limit,
+        'latest': draws[0] if draws else None,
+        'recent_draws': draws[:100],
+        'hot': st.get('hot', []),
+        'cold': st.get('cold', []),
+        'missing20': st.get('overdue', []),
+        'odd': odd,
+        'even': even,
+        'sections': sections,
+        'sum_min': min(sums) if sums else 0,
+        'sum_avg': round(sum(sums)/len(sums),1) if sums else 0,
+        'sum_max': max(sums) if sums else 0,
+        'top_pairs': [{'pair':list(k),'count':v} for k,v in pair_counter.most_common(15)] or st.get('top_pairs', []),
+        'freq': st.get('freq',{}),
+        'freq100': st.get('freq100',{}),
+        'engine_version': st.get('engine_version'),
+        'analysis_confirm': st.get('analysis_confirm'),
+        'round_range': st.get('round_range', []),
+        'latest_round': st.get('latest_round', 0),
+        'target_round': st.get('target_round', 1231),
+        'is_full_history': bool(st.get('is_full_history')),
+        'missing_rounds_count': int(st.get('missing_rounds_count') or 0),
+        'expected_count': int(st.get('expected_count') or 0),
+        'actual_count': int(st.get('actual_count') or 0),
+    }
 
 def csv_response(filename, headers, rows):
     bio=io.StringIO()

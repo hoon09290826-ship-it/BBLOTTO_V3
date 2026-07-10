@@ -780,11 +780,12 @@ function renderStats(d){
   const bars=Object.entries(freq).sort((a,b)=>Number(b[1])-Number(a[1])).slice(0,15).map(([n,c])=>`<div class="stats-bar"><b>${n}</b><div><i style="width:${Math.round(Number(c)/maxFreq*100)}%"></i></div><span>${c}회</span></div>`).join('');
   box.innerHTML=`<div class="stats-dashboard">
     <div class="stats-kpi">
-      <div class="stat-card"><b>${d.count}</b><span>분석 회차</span></div>
+      <div class="stat-card"><b>${d.count}</b><span>전체 분석 회차</span></div>
       <div class="stat-card"><b>${d.sum_avg}</b><span>평균 합계</span></div>
       <div class="stat-card"><b>${d.odd}:${d.even}</b><span>홀짝 누적</span></div>
       <div class="stat-card"><b>${(d.sections||[]).join(' / ')}</b><span>구간 1~15 / 16~30 / 31~45</span></div>
     </div>
+    <div class="detail-section"><h4>분석 엔진 상태</h4><div class="hint">${d.analysis_confirm||'분석 상태 확인 중'} · 범위 ${(d.round_range||[]).join('~')||'-'} · 누락 ${d.missing_rounds_count||0}개 · 전체분석 ${d.is_full_history?'완료':'미완료'}</div></div>
     <div class="stats-panels">
       <div class="detail-section"><h4>HOT 번호</h4><div class="nums-line">${hot}</div><h4>COLD 번호</h4><div class="nums-line">${cold}</div><h4>미출현/공백 번호</h4><div class="nums-line">${miss}</div></div>
       <div class="detail-section"><h4>번호 발생 빈도 TOP 15</h4><div class="stats-bars">${bars||'데이터 없음'}</div></div>
