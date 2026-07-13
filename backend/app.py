@@ -3240,7 +3240,7 @@ def api_stats(limit:int=100, authorization: str|None = Header(default=None)):
         'analysis_confirm': st.get('analysis_confirm'),
         'round_range': st.get('round_range', []),
         'latest_round': st.get('latest_round', 0),
-        'target_round': st.get('target_round', 1231),
+        'target_round': st.get('target_round', st.get('latest_round', 0)),
         'is_full_history': bool(st.get('is_full_history')),
         'missing_rounds_count': int(st.get('missing_rounds_count') or 0),
         'expected_count': int(st.get('expected_count') or 0),
@@ -7534,7 +7534,7 @@ try:
     BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_AI_V6_DB_FULL_HISTORY_CACHE'
 
     @app.get('/api/ai-engine/v6-cache')
-    def ai_engine_v6_cache(authorization: str|None = Header(default=None), force: int = 0, target_round: int = 1231):
+    def ai_engine_v6_cache(authorization: str|None = Header(default=None), force: int = 0, target_round: int|None = None):
         require_admin(authorization)
         cache = _ai_v6_get_analysis_cache(bool(force), target_round=target_round)
         return {
@@ -7564,7 +7564,7 @@ try:
     from .ai_engine_v7 import sync_official_full_history as _ai_v6_sync_official_full_history
 
     @app.post('/api/ai-engine/v6-sync-full')
-    def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int = 1231):
+    def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int|None = None):
         require_admin(authorization)
         return _ai_v6_sync_official_full_history(max_round=max_round)
 except Exception as _v6_sync_import_error:
@@ -7581,13 +7581,13 @@ try:
     from .ai_engine_v7 import get_analysis_cache as _bb_v6_cache_ui
 
     @app.post('/api/admin/ai-v6/full-sync')
-    def admin_ai_v6_full_sync(authorization: str|None = Header(default=None), max_round: int = 1231):
+    def admin_ai_v6_full_sync(authorization: str|None = Header(default=None), max_round: int|None = None):
         require_admin(authorization)
         sync_result = _bb_v6_sync_full_ui(max_round=max_round)
         cache = _bb_v6_cache_ui(True, target_round=max_round)
         return {
             'ok': True,
-            'message': sync_result.get('message') or (f'1회차~{max_round}회차 전체 동기화/분석 저장 완료' if cache.get('is_full_history') else f'전체 분석 미완료: {cache.get("missing_rounds_count", 0)}개 누락'),
+            'message': sync_result.get('message') or (f'1회차~{cache.get("target_round", max_round)}회차 전체 동기화/분석 저장 완료' if cache.get('is_full_history') else f'전체 분석 미완료: {cache.get("missing_rounds_count", 0)}개 누락'),
             'completed': bool(cache.get('is_full_history')),
             'sync_result': sync_result,
             'cache': {
@@ -7609,12 +7609,12 @@ try:
     from .ai_engine_v7 import sync_official_history_step as _bb_v6_sync_step_ui
 
     @app.post('/api/admin/ai-v6/full-sync-step')
-    def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int = 1231, chunk_size: int = 40):
+    def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int|None = None, chunk_size: int = 40):
         require_admin(authorization)
         return _bb_v6_sync_step_ui(max_round=max_round, chunk_size=chunk_size)
 
     @app.get('/api/admin/ai-v6/cache-status')
-    def admin_ai_v6_cache_status(authorization: str|None = Header(default=None), target_round: int = 1231):
+    def admin_ai_v6_cache_status(authorization: str|None = Header(default=None), target_round: int|None = None):
         require_admin(authorization)
         cache = _bb_v6_cache_ui(False, target_round=target_round)
         return {
@@ -7633,7 +7633,7 @@ try:
         }
 
     @app.get('/admin/sync-full-history')
-    def admin_sync_full_history_url_notice(authorization: str|None = Header(default=None), max_round: int = 1231):
+    def admin_sync_full_history_url_notice(authorization: str|None = Header(default=None), max_round: int|None = None):
         # 브라우저 주소창 직접 입력 시 기존처럼 Not Found가 나오지 않도록 안내한다.
         # 실제 실행은 로그인 후 관리자 화면 버튼 또는 Authorization 헤더가 있는 요청에서만 가능하다.
         if not authorization:

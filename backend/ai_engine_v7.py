@@ -4,7 +4,7 @@
 - 당첨번호 DB의 1회차~최신회차 전체를 분석한다.
 - 분석 결과를 JSON 파일이 아니라 DB 테이블(ai_analysis_cache)에 저장한다.
 - 추천번호 생성 버튼은 저장된 캐시만 읽어 빠르게 동작한다.
-- DB에 1회차~1231회차가 모두 있는지 상태값으로 확인할 수 있다.
+- DB에 1회차~최신 완료 회차가 모두 있는지 상태값으로 확인할 수 있다.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import random
 import sqlite3
 import time
 import os
+import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from pathlib import Path
@@ -25,7 +26,31 @@ ALT_DB_PATH = BASE / "database" / "lotto.db"
 ENGINE_VERSION = "BBLOTTO_RC9_AI_V7_STATISTICAL_ANALYSIS"
 CACHE_KEY = "rc9_v7_full_history_statistical"
 MIN_REQUIRED_ROUND = 1
-DEFAULT_TARGET_ROUND = 1231
+DEFAULT_TARGET_ROUND = 1231  # DB가 완전히 비어 있을 때만 사용하는 안전 폴백
+
+def _completed_round_kst(now: Optional[datetime.datetime] = None) -> int:
+    """한국시간 기준으로 추첨이 완료된 최신 회차를 계산한다.
+
+    매주 토요일 20:35 이후 해당 회차를 포함하며, 그 전에는 직전 회차까지를
+    분석 대상으로 사용한다. 새 회차가 나오면 코드 수정 없이 자동 확장된다.
+    """
+    try:
+        dt = now or (datetime.datetime.utcnow() + datetime.timedelta(hours=9))
+        first = datetime.date(2002, 12, 7)
+        today = dt.date()
+        expected = int(((today - first).days // 7) + 1) if today >= first else 1
+        draw_dt = datetime.datetime.combine(
+            first + datetime.timedelta(days=(expected - 1) * 7),
+            datetime.time(20, 35),
+        )
+        return expected if dt >= draw_dt else max(1, expected - 1)
+    except Exception:
+        return DEFAULT_TARGET_ROUND
+
+def _resolve_target_round(requested: Optional[int], latest_stored: int = 0) -> int:
+    if requested is not None and int(requested) > 0:
+        return int(requested)
+    return max(int(latest_stored or 0), _completed_round_kst(), DEFAULT_TARGET_ROUND)
 
 
 def _conn(db_path: Path = DB_PATH) -> sqlite3.Connection:
@@ -228,12 +253,12 @@ def _write_cache_to_db(cache: Dict[str, Any]) -> None:
 def _build_cache(target_round: Optional[int] = None) -> Dict[str, Any]:
     draws = _load_draws()
     if not draws:
-        cache = {"engine_version": ENGINE_VERSION, "draw_count": 0, "latest_round": 0, "target_round": int(target_round or DEFAULT_TARGET_ROUND), "error": "당첨번호 DB가 비어 있습니다."}
+        cache = {"engine_version": ENGINE_VERSION, "draw_count": 0, "latest_round": 0, "target_round": _resolve_target_round(target_round, 0), "error": "당첨번호 DB가 비어 있습니다."}
         _write_cache_to_db(cache)
         return cache
 
     latest_round = max(d["r"] for d in draws)
-    target = int(target_round or max(DEFAULT_TARGET_ROUND, latest_round))
+    target = _resolve_target_round(target_round, latest_round)
     coverage = _coverage(draws, target)
     all_nums = _flatten(draws)
     recent10, recent30, recent50, recent100, recent300 = draws[:10], draws[:30], draws[:50], draws[:100], draws[:300]
@@ -318,7 +343,7 @@ def _cache_valid(cache: Dict[str, Any], draws: Sequence[Dict[str, Any]], target_
     if not cache or not draws:
         return False
     latest = max(d["r"] for d in draws)
-    target = int(target_round or max(DEFAULT_TARGET_ROUND, latest))
+    target = _resolve_target_round(target_round, latest)
     return (
         int(cache.get("latest_round") or 0) == latest
         and int(cache.get("draw_count") or 0) == len(draws)
@@ -381,7 +406,7 @@ def latest_stats(limit: int = 0) -> Dict[str, Any]:
         "cache_storage": c.get("cache_storage"),
         "latest_round": c.get("latest_round", 0),
         "next_round": c.get("next_round", 0),
-        "target_round": c.get("target_round", DEFAULT_TARGET_ROUND),
+        "target_round": c.get("target_round", _resolve_target_round(None, int(c.get("latest_round") or 0))),
         "draw_count": c.get("draw_count", 0),
         "round_range": c.get("round_range", []),
         "is_full_history": c.get("is_full_history", False),
@@ -622,7 +647,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
 # ---- 공식 동행복권 API 보강 ----
 def _official_fetch(round_no: int, timeout: int = 4) -> Optional[Dict[str, Any]]:
     """동행복권 공식 회차 JSON을 가져온다.
-    - 1~1231 전체 동기화를 위해 User-Agent/Referer를 넣고 HTTPS 실패 시 HTTP도 재시도한다.
+    - 1~최신 완료 회차 전체 동기화를 위해 User-Agent/Referer를 넣고 HTTPS 실패 시 HTTP도 재시도한다.
     - 실패 시 None을 반환하여 누락 회차로 표시한다.
     """
     import urllib.request
@@ -729,17 +754,17 @@ def _save_draw(draw: Dict[str, Any]) -> None:
             )
 
 
-def sync_official_full_history(max_round: Optional[int] = DEFAULT_TARGET_ROUND, stop_after_miss: int = 3) -> Dict[str, Any]:
+def sync_official_full_history(max_round: Optional[int] = None, stop_after_miss: int = 3) -> Dict[str, Any]:
     """1회차부터 max_round까지 누락분을 공식 API로 보강하고 DB 캐시를 재생성한다.
 
     RC8.6 핵심 수정:
-    - 버튼을 눌렀을 때 상태 확인만 하지 않고 실제로 1~1231 누락 회차를 공식 API에서 내려받아 저장한다.
+    - 버튼을 눌렀을 때 상태 확인만 하지 않고 실제로 1~최신 완료 회차 누락 회차를 공식 API에서 내려받아 저장한다.
     - 단일 요청 반복이 느려서 동시 다운로드 방식으로 변경했다.
     - 완료되지 않았는데도 "완료"라고 표시하지 않도록 is_full_history 기준으로 결과를 분리한다.
     """
     before = _load_draws()
     existing = {int(d["r"]) for d in before}
-    target = int(max_round or DEFAULT_TARGET_ROUND)
+    target = _resolve_target_round(max_round, max(existing) if existing else 0)
     missing = [r for r in range(MIN_REQUIRED_ROUND, target + 1) if r not in existing]
     saved = 0
     failed_rounds: List[int] = []
@@ -809,8 +834,8 @@ def sync_official_full_history(max_round: Optional[int] = DEFAULT_TARGET_ROUND, 
     }
 
 
-def sync_official_history_step(max_round: int = DEFAULT_TARGET_ROUND, chunk_size: int = 40) -> Dict[str, Any]:
-    target = int(max_round or DEFAULT_TARGET_ROUND)
+def sync_official_history_step(max_round: Optional[int] = None, chunk_size: int = 40) -> Dict[str, Any]:
+    target = _resolve_target_round(max_round, max(existing) if existing else 0)
     before = _load_draws()
     existing = {int(d["r"]) for d in before}
     missing_before = [r for r in range(MIN_REQUIRED_ROUND, target + 1) if r not in existing]
@@ -937,12 +962,12 @@ def _build_cache(target_round: Optional[int] = None) -> Dict[str, Any]:
     draws = _load_draws()
     if not draws:
         cache = {"engine_version": ENGINE_VERSION, "draw_count": 0, "latest_round": 0,
-                 "target_round": int(target_round or DEFAULT_TARGET_ROUND), "error": "당첨번호 DB가 비어 있습니다."}
+                 "target_round": _resolve_target_round(target_round, 0), "error": "당첨번호 DB가 비어 있습니다."}
         _write_cache_to_db(cache)
         return cache
 
     latest_round = max(int(d["r"]) for d in draws)
-    target = int(target_round or latest_round)
+    target = _resolve_target_round(target_round, latest_round)
     coverage = _coverage(draws, target)
     windows = {10: draws[:10], 20: draws[:20], 30: draws[:30], 50: draws[:50], 100: draws[:100], 300: draws[:300]}
     counters = {k: Counter(_flatten(v)) for k, v in windows.items()}
