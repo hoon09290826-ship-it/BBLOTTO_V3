@@ -512,20 +512,49 @@ function buildRecommendationAnalysis(combos, details=[]){
   if(!sets.length) return '';
   const flat=sets.flat().map(Number).filter(Number.isFinite);
   const counts={}; flat.forEach(n=>counts[n]=(counts[n]||0)+1);
-  const repeated=Object.entries(counts).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]||Number(a[0])-Number(b[0])).slice(0,5).map(([n])=>n);
-  const sums=sets.map(c=>c.reduce((a,b)=>a+Number(b),0));
-  const avgSum=Math.round(sums.reduce((a,b)=>a+b,0)/sums.length);
-  const avgOdd=(sets.reduce((a,c)=>a+c.filter(n=>Number(n)%2===1).length,0)/sets.length).toFixed(1);
+  const repeated=Object.entries(counts).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]||Number(a[0])-Number(b[0])).slice(0,5).map(([n])=>Number(n));
+  const low=flat.filter(n=>n<=15).length, mid=flat.filter(n=>n>=16&&n<=30).length, high=flat.filter(n=>n>=31).length;
+  const zone=[['낮은 번호대',low],['중간 번호대',mid],['높은 번호대',high]].sort((a,b)=>b[1]-a[1])[0][0];
+  const consecutive=sets.reduce((t,c)=>t+c.slice(0,-1).filter((n,i)=>Number(c[i+1])-Number(n)===1).length,0);
   const maxOverlap=sets.reduce((mx,a,i)=>Math.max(mx,...sets.slice(i+1).map(b=>a.filter(n=>b.includes(n)).length),0),0);
-  const scoreVals=(details||[]).map(d=>Number(d.score ?? d.vip_score ?? d.ai_score ?? 0)).filter(Boolean);
-  const avgScore=scoreVals.length?(scoreVals.reduce((a,b)=>a+b,0)/scoreVals.length).toFixed(1):'';
-  const lines=[
-    `생성된 ${sets.length}개 조합은 평균 합계 ${avgSum}, 평균 홀수 ${avgOdd}개 수준으로 분산 구성했습니다.`,
-    repeated.length?`반복 핵심수는 ${repeated.join(', ')}번이며, 동일 번호의 과도한 편중은 제한했습니다.`:'조합별 번호 중복을 최소화해 각 조합의 독립성과 분산성을 높였습니다.',
-    `조합 간 최대 중복은 ${maxOverlap}개로 제한하고 홀짝·구간·끝수 균형을 함께 검증했습니다.`,
-    avgScore?`최종 선별 조합의 평균 AI 점수는 ${avgScore}점으로, 상위 후보군에서 다양성을 우선해 선정했습니다.`:'상위 후보군 가운데 패턴 중복이 적고 균형도가 높은 조합만 최종 선정했습니다.'
+  const seed=(Date.now()+Math.floor(Math.random()*1000000)+flat.reduce((a,b,i)=>a+b*(i+1),0))>>>0;
+  const pick=(arr,salt=0)=>arr[(seed+salt)%arr.length];
+
+  const opening=[
+    `이번 ${sets.length}개 조합은 서로 비슷한 모양이 반복되지 않도록 나누어 구성했습니다.`,
+    `추천번호는 한 가지 흐름에 몰리지 않도록 여러 형태로 나누어 만들었습니다.`,
+    `${sets.length}개 조합마다 번호 구성을 다르게 해 선택의 폭을 넓혔습니다.`,
+    `이번 추천은 조합마다 특징이 겹치지 않도록 번호를 고르게 배치했습니다.`
   ];
-  return lines.join('\n');
+  const zones=[
+    `${zone}의 흐름이 조금 더 보이지만 다른 번호대도 함께 섞어 균형을 맞췄습니다.`,
+    `낮은 번호부터 높은 번호까지 한쪽에 몰리지 않도록 나누어 넣었습니다.`,
+    `번호대가 한 구간에 치우치지 않도록 조합별로 다르게 배치했습니다.`,
+    `여러 번호대를 섞어 조합마다 비슷한 모습이 반복되지 않게 했습니다.`
+  ];
+  const repeats=repeated.length ? [
+    `${repeated.join(', ')}번은 여러 조합에서 중심 역할을 하도록 나누어 반영했습니다.`,
+    `공통으로 활용한 번호는 ${repeated.join(', ')}번이며, 나머지는 조합마다 다르게 구성했습니다.`,
+    `${repeated.join(', ')}번을 중심 후보로 두고 주변 번호는 다양하게 바꿨습니다.`
+  ] : [
+    '같은 번호가 여러 조합에 지나치게 반복되지 않도록 구성했습니다.',
+    '조합별 번호 중복을 줄여 각 조합의 차이를 살렸습니다.',
+    '공통 번호를 최소화해 서로 다른 가능성을 나누어 담았습니다.'
+  ];
+  const shapes=[
+    maxOverlap<=2 ? '조합끼리 겹치는 번호를 줄여 각각의 구성을 분명하게 했습니다.' : '겹치는 번호는 중심 후보에만 남기고 나머지는 다르게 배치했습니다.',
+    consecutive ? '연속번호는 일부 조합에만 넣어 흐름을 살리면서 반복은 줄였습니다.' : '연속번호가 과하게 몰리지 않도록 전체 조합을 고르게 정리했습니다.',
+    '홀수와 짝수, 번호 간 간격을 함께 살펴 자연스러운 구성을 우선했습니다.',
+    '끝자리와 번호 간격이 비슷한 조합은 줄이고 서로 다른 형태를 선택했습니다.'
+  ];
+  const closing=[
+    '전체적으로 보기 쉬우면서도 조합마다 차이가 나도록 정리한 추천입니다.',
+    '최근 흐름을 반영하되 한 가지 패턴에만 치우치지 않도록 구성했습니다.',
+    '비슷한 번호 조합을 줄이고 여러 가능성을 나누어 담았습니다.',
+    '단순 반복보다 조합의 다양성과 균형을 우선한 결과입니다.'
+  ];
+  return [pick(opening,1),pick(zones,5),pick(repeats,9),pick(shapes,13),pick(closing,17)]
+    .filter((v,i,a)=>v && a.indexOf(v)===i).slice(0,4).join('\n');
 }
 
 function renderRecommendationAnalysis(text){

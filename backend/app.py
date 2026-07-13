@@ -7616,51 +7616,113 @@ except Exception as _bb_v6_ui_sync_error:
     print('[BBLOTTO] AI V6 admin UI sync endpoint failed:', _bb_v6_ui_sync_error)
 
 
-# ===================== RC8.15 EXPERT ANALYSIS SUMMARY =====================
+# ===================== RC10.2 DYNAMIC MEMBER-FRIENDLY ANALYSIS =====================
 def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
-    """Return a concise 3-5 line expert summary based on actual engine statistics."""
+    """추천번호의 실제 특징을 바탕으로, 생성할 때마다 표현이 달라지는 쉬운 분석문을 만든다."""
+    import random
+    import secrets
+
     details = details or []
-    combos = [d.get('numbers') or [] for d in details]
-    flat = [int(n) for combo in combos for n in combo if str(n).isdigit()]
-    scores = [float(d.get('score') or d.get('ai_score') or d.get('vip_score') or 0) for d in details]
-    hot = [int(x) for x in (st.get('hot300') or st.get('hot100') or st.get('hot') or [])[:6]]
-    overdue = [int(x) for x in (st.get('overdue300') or st.get('overdue100') or st.get('overdue') or [])[:6]]
-    pairs = st.get('top_pairs') or st.get('pairs') or []
-    latest_round = int(st.get('latest_round') or st.get('target_round') or max(0, int(round_no or 1)-1))
-    actual_count = int(st.get('actual_count') or st.get('draw_count') or st.get('history_count') or latest_round or 0)
+    combos = []
+    for item in details:
+        nums = item.get('numbers') or item.get('nums') or item.get('combo') or []
+        try:
+            nums = sorted({int(n) for n in nums if 1 <= int(n) <= 45})
+        except Exception:
+            nums = []
+        if len(nums) == 6:
+            combos.append(nums)
+
+    flat = [n for combo in combos for n in combo]
+    rng = random.Random(secrets.randbits(64))
+    latest_round = int(st.get('latest_round') or st.get('target_round') or max(0, int(round_no or 1) - 1))
+    hot = [int(x) for x in (st.get('hot300') or st.get('hot100') or st.get('hot') or [])[:10] if str(x).isdigit()]
+    overdue = [int(x) for x in (st.get('overdue300') or st.get('overdue100') or st.get('overdue') or [])[:10] if str(x).isdigit()]
+
+    if not flat:
+        return '\n'.join(rng.sample([
+            '최근 흐름과 전체 기록을 함께 살펴 번호가 한쪽에 몰리지 않도록 구성했습니다.',
+            '자주 나온 번호와 한동안 쉬었던 번호를 섞어 이번 회차의 변화를 함께 살폈습니다.',
+            '비슷한 모양의 조합이 반복되지 않도록 번호 간 간격과 구간을 고르게 맞췄습니다.',
+            '이번 추천은 단순히 많이 나온 번호만 고르지 않고 전체적인 균형을 우선했습니다.',
+        ], 3))
+
+    low = sum(1 for n in flat if n <= 15)
+    mid = sum(1 for n in flat if 16 <= n <= 30)
+    high = len(flat) - low - mid
     odd = sum(1 for n in flat if n % 2)
     even = len(flat) - odd
-    low = sum(1 for n in flat if 1 <= n <= 15)
-    mid = sum(1 for n in flat if 16 <= n <= 30)
-    high = sum(1 for n in flat if 31 <= n <= 45)
-    avg_score = round(sum(scores) / len(scores), 1) if scores else 0
-    mode_name = {'balanced':'균형형','aggressive':'공격형','conservative':'안정형'}.get(mode, '균형형')
-    hot_text = ', '.join(map(str, hot[:5])) if hot else '최근 강세 후보군'
-    overdue_text = ', '.join(map(str, overdue[:5])) if overdue else '장기 보강 후보군'
-    pair_text = ''
-    if pairs:
-        p = pairs[0]
-        if isinstance(p, dict):
-            a, b = p.get('a') or p.get('n1'), p.get('b') or p.get('n2')
-            if a and b: pair_text = f'{a}-{b}'
-        elif isinstance(p, (list, tuple)) and len(p) >= 2:
-            pair_text = f'{p[0]}-{p[1]}'
-    lines = [
-        f'{actual_count or latest_round}개 누적 회차와 최근 흐름을 교차 분석한 결과, {hot_text} 번호군의 상승 탄력이 상대적으로 강하게 나타났습니다.',
-        f'{overdue_text} 후보는 미출현 간격과 재진입 주기를 함께 검토해 강세 번호와 혼합 배치했습니다.',
+    zone_counts = [('낮은 번호대', low), ('중간 번호대', mid), ('높은 번호대', high)]
+    strongest_zone = max(zone_counts, key=lambda x: x[1])[0]
+    most_common = []
+    freq = {}
+    for n in flat:
+        freq[n] = freq.get(n, 0) + 1
+    most_common = [n for n, _ in sorted(freq.items(), key=lambda x: (-x[1], x[0]))[:5]]
+    hot_used = [n for n in hot if n in freq][:4]
+    overdue_used = [n for n in overdue if n in freq][:4]
+    consecutive_count = sum(1 for c in combos for a, b in zip(c, c[1:]) if b - a == 1)
+    same_end_count = 0
+    for c in combos:
+        ends = [n % 10 for n in c]
+        same_end_count += len(ends) - len(set(ends))
+
+    mode_label = {'balanced': '균형을 우선한', 'conservative': '안정적인 흐름을 우선한', 'aggressive': '변화를 조금 더 반영한'}.get(mode, '균형을 우선한')
+    opening_pool = [
+        f'{latest_round}회차까지의 기록과 최근 흐름을 함께 살펴 이번 추천을 구성했습니다.',
+        '이번 회차는 오래된 기록과 최근 움직임을 같이 비교해 번호를 골랐습니다.',
+        '최근 결과만 보지 않고 전체 흐름까지 함께 확인해 추천번호를 정리했습니다.',
+        f'1회차부터 {latest_round}회차까지의 흐름을 바탕으로 이번 조합을 새로 구성했습니다.',
+        '이번 추천은 자주 나온 번호와 잠시 쉬었던 번호를 함께 비교해 만들었습니다.',
     ]
-    if flat:
-        lines.append(f'{mode_name} 기준 전체 홀짝은 {odd}:{even}, 저·중·고 구간은 {low}/{mid}/{high}로 맞춰 특정 구간 편중을 낮췄습니다.')
-    else:
-        lines.append(f'{mode_name} 기준으로 홀짝·구간·끝수 분포와 번호 간격을 동시에 점검해 균형형 후보를 우선 선별했습니다.')
-    if pair_text:
-        lines.append(f'동반출현 흐름에서는 {pair_text} 연계성을 참고하고, 끝수 반복·연속수·AC값이 과도한 조합은 제외했습니다.')
-    else:
-        lines.append('동반출현, 끝수 반복, 연속수와 AC값을 함께 검증해 형태가 유사한 조합은 후순위로 제외했습니다.')
-    if avg_score:
-        lines.append(f'최종 조합 평균 분석점수는 {avg_score}점으로, 누적 안정성과 최근 변화 가능성이 함께 유지되는 조합을 선정했습니다.')
-    return '\n'.join(lines[:5])
-# ===================== /RC8.15 EXPERT ANALYSIS SUMMARY =====================
+    zone_pool = [
+        f'{strongest_zone}의 흐름이 비교적 눈에 띄어 다른 번호대와 함께 고르게 섞었습니다.',
+        '낮은 번호, 중간 번호, 높은 번호가 한쪽에 몰리지 않도록 나누어 배치했습니다.',
+        '특정 번호대만 반복되지 않도록 여러 구간을 섞어 조합의 폭을 넓혔습니다.',
+        f'{mode_label} 방식으로 번호대를 나누어 전체적인 모양을 맞췄습니다.',
+    ]
+    flow_pool = []
+    if hot_used:
+        flow_pool += [
+            f'최근 자주 보인 {", ".join(map(str, hot_used))}번을 중심 후보로 두되 다른 번호와 함께 분산했습니다.',
+            f'{", ".join(map(str, hot_used))}번은 최근 흐름이 이어져 일부 조합에 나누어 반영했습니다.',
+        ]
+    if overdue_used:
+        flow_pool += [
+            f'한동안 쉬었던 {", ".join(map(str, overdue_used))}번도 일부 포함해 변화 가능성을 살폈습니다.',
+            f'{", ".join(map(str, overdue_used))}번은 오랜 공백 뒤 다시 나올 가능성을 고려해 보강 후보로 넣었습니다.',
+        ]
+    if not flow_pool:
+        flow_pool = [
+            '최근에 자주 나온 번호와 한동안 쉬었던 번호를 함께 섞어 한쪽 흐름에 치우치지 않게 했습니다.',
+            f'반복해서 사용된 중심 번호는 {", ".join(map(str, most_common))}번이며, 나머지 번호는 조합마다 다르게 배치했습니다.',
+            '단순 출현 횟수보다 최근 움직임과 번호 간 조화를 함께 살폈습니다.',
+        ]
+    shape_pool = [
+        '홀수와 짝수가 지나치게 한쪽으로 쏠리지 않도록 조합마다 균형을 맞췄습니다.',
+        '조합끼리 같은 번호가 너무 많이 겹치지 않도록 서로 다른 구성을 우선했습니다.',
+        '번호 간 간격이 너무 좁거나 넓은 조합은 줄이고 자연스러운 배열을 선택했습니다.',
+        '끝자리가 같은 번호가 지나치게 반복되지 않도록 조합별로 나누어 배치했습니다.',
+    ]
+    if consecutive_count:
+        shape_pool.append('연속번호는 일부 조합에만 넣어 최근 흐름을 반영하면서도 반복을 줄였습니다.')
+    if same_end_count <= max(2, len(combos)):
+        shape_pool.append('끝자리 분포가 비교적 고르게 나오도록 비슷한 끝수의 반복을 줄였습니다.')
+    close_pool = [
+        '전체적으로 비슷한 조합의 반복을 줄이고 각 조합의 차이를 살린 추천입니다.',
+        '이번 결과는 한 가지 흐름에만 기대지 않고 여러 가능성을 나누어 담았습니다.',
+        '번호가 한곳에 몰리지 않도록 조정해 보기 편하고 이해하기 쉬운 구성으로 정리했습니다.',
+        '최근 흐름을 반영하되 과도한 편중은 줄이는 방향으로 최종 조합을 골랐습니다.',
+    ]
+
+    candidates = [rng.choice(opening_pool), rng.choice(zone_pool), rng.choice(flow_pool), rng.choice(shape_pool), rng.choice(close_pool)]
+    result = []
+    for line in candidates:
+        if line not in result:
+            result.append(line)
+    # 화면이 지나치게 길어지지 않도록 4줄만 제공한다.
+    return '\n'.join(result[:4])
+# ===================== /RC10.2 DYNAMIC MEMBER-FRIENDLY ANALYSIS =====================
 
 
 # ===== RC9 AI V7 integrity audit =====
