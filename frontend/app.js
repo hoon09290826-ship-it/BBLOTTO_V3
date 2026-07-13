@@ -1493,6 +1493,7 @@ window.detailMember=safe(async function(id){
     <div class="detail-section rc43-summary"><h4>적중 요약</h4><p>${esc(rankText)}</p><p>누적 당첨금 ${formatMoney(summary.total_prize||0)} · 누적 구매금 ${formatMoney(summary.total_cost||0)} · ROI ${esc(summary.roi||0)}%</p></div>
     <div class="detail-section"><h4>회원 메모</h4><textarea id="memberMemoEdit" class="detail-edit-textarea">${esc(m.memo||'')}</textarea><div class="btnrow"><button onclick="saveMemberMemo(${m.id})" class="primary">메모 저장</button></div></div>
     <div class="detail-section"><h4>상담 이력 추가</h4><div class="note-write"><select id="memberNoteType"><option>상담</option><option>결제</option><option>추천안내</option><option>당첨확인</option><option>기타</option></select><textarea id="memberNoteText" placeholder="상담/안내 내용을 입력하세요."></textarea><button onclick="saveMemberNote(${m.id})" class="primary">이력 추가</button></div>${renderNoteCards(d.notes)}</div>
+    <div class="detail-section"><h4>문구 이력 추가</h4><div class="note-write manual-message-write"><input id="manualSmsRound" type="number" min="1" value="${esc(currentRound||'')}" placeholder="회차"><textarea id="manualSmsBody" placeholder="회원에게 전달한 문구를 직접 입력하세요."></textarea><button onclick="saveManualSmsLog(${m.id})" class="primary">문구 추가</button></div></div>
     <div class="detail-section"><h4>문구 이력</h4>${renderHistoryCards(d.sms_logs,'sms', m.id)}</div>
     <div class="detail-section rc43-winning"><h4>당첨 이력</h4>${renderWinningHistorySummary(d.winning_checks)}</div>
   `;
@@ -1511,6 +1512,25 @@ window.saveMemberNote=safe(async function(id){
   toast('상담 이력을 추가했습니다.');
   await detailMember(id);
   await loadMembers();
+});
+window.saveManualSmsLog=safe(async function(id){
+  const m=membersCache.find(x=>String(x.id)===String(id));
+  const body=String($('manualSmsBody')?.value||'').trim();
+  const roundNo=Number($('manualSmsRound')?.value||currentRound||0);
+  if(!body) return alert('추가할 문구를 입력하세요.');
+  await api('/api/sms_log',{method:'POST',body:{
+    member_id:Number(id),
+    member_name:m?.name||'',
+    phone:m?.phone||'',
+    round_no:roundNo,
+    body,
+    combos:[],
+    send_now:false
+  }});
+  toast('문구 이력에 추가했습니다.');
+  await detailMember(id);
+  await loadMembers();
+  await loadDashboard();
 });
 window.deleteSmsLog=safe(async function(smsId, memberId){
   if(!smsId) return alert('삭제할 문구 이력을 찾지 못했습니다.');
@@ -2529,4 +2549,4 @@ setTimeout(()=>{ if(typeof token==='function' && token()) loadOpsHealth(); }, 12
 
 
 
-// RC8.17: core/recommendation analysis split; member quick generation stays on list without popup.
+// RC8.18: manual message-history addition and saved-only recommendation workflow preparation.
