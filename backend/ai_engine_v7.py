@@ -835,9 +835,12 @@ def sync_official_full_history(max_round: Optional[int] = None, stop_after_miss:
 
 
 def sync_official_history_step(max_round: Optional[int] = None, chunk_size: int = 40) -> Dict[str, Any]:
-    target = _resolve_target_round(max_round, max(existing) if existing else 0)
+    # 먼저 저장된 회차를 읽은 뒤 목표 회차를 계산해야 합니다.
+    # RC9.2에서는 existing 변수를 만들기 전에 참조해 Railway에서 500 오류가 발생했습니다.
     before = _load_draws()
     existing = {int(d["r"]) for d in before}
+    latest_stored = max(existing) if existing else 0
+    target = _resolve_target_round(max_round, latest_stored)
     missing_before = [r for r in range(MIN_REQUIRED_ROUND, target + 1) if r not in existing]
     saved = 0
     failed_rounds: List[int] = []

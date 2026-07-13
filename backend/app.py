@@ -7611,7 +7611,18 @@ try:
     @app.post('/api/admin/ai-v6/full-sync-step')
     def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int|None = None, chunk_size: int = 40):
         require_admin(authorization)
-        return _bb_v6_sync_step_ui(max_round=max_round, chunk_size=chunk_size)
+        try:
+            return _bb_v6_sync_step_ui(max_round=max_round, chunk_size=chunk_size)
+        except Exception as exc:
+            # 브라우저에는 원인을 알 수 없는 500 오류 대신 재시도 가능한 안내를 반환합니다.
+            print('[BBLOTTO] AI V7 step sync failed:', repr(exc))
+            return {
+                'ok': False,
+                'completed': False,
+                'message': '회차 동기화 처리 중 오류가 발생했습니다. 잠시 후 다시 실행해주세요.',
+                'error_type': type(exc).__name__,
+                'retryable': True,
+            }
 
     @app.get('/api/admin/ai-v6/cache-status')
     def admin_ai_v6_cache_status(authorization: str|None = Header(default=None), target_round: int|None = None):

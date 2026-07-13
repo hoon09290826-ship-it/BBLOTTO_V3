@@ -1239,7 +1239,10 @@ async function syncAiV6FullHistory(){
   try{
     let last = null;
     for(let i=1;i<=40;i++){
-      const d = await api('/api/admin/ai-v6/full-sync-step?chunk_size=40', {method:'POST'});
+      const d = await api('/api/admin/ai-v6/full-sync-step?chunk_size=25', {method:'POST'});
+      if(d && d.ok === false && d.retryable){
+        throw new Error(d.message || '회차 동기화 처리 중 오류가 발생했습니다.');
+      }
       last = d;
       const c = d.cache || d;
       renderAiV6CacheStatus(c);
