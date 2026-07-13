@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bblotto-rc11-3-security';
+const CACHE_NAME = 'bblotto-rc11-4-clean-stable';
 self.addEventListener('install', event => {
   self.skipWaiting();
 });

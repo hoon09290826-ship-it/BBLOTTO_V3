@@ -26,7 +26,7 @@ EXPORT_DIR = Path(os.getenv('BBLOTTO_EXPORT_DIR', str(DB_DIR / 'exports'))); EXP
 DB = DB_DIR / 'bblotto_v34.db'
 FRONT = BASE / 'frontend'
 
-RC_VERSION = 'RC11_EXPLAINABLE_ANALYSIS_SECURITY'
+RC_VERSION = 'RC11.4_PROJECT_CLEAN_STABLE'
 APP_VERSION = 'BBLOTTO PRO V2 STABLE'
 app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}', docs_url=None, redoc_url=None, openapi_url=None)
 RC3_8_VERSION = 'V2_STABLE_RC3_15'
