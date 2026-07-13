@@ -1,8 +1,8 @@
 (function(){
   'use strict';
-  const VERSION='RC12.0-20260713-FINAL-REBUILD';
+  const VERSION='RC12.1-20260713-WINNING-BUTTON-FIX';
   const $=id=>document.getElementById(id);
-  function token(){ return localStorage.getItem('bb_v34_token') || ''; }
+  function token(){ try{return localStorage.getItem('bb_v34_token')||'';}catch(_){return '';} }
   async function request(path, options={}){
     const headers=Object.assign({'Content-Type':'application/json'}, options.headers||{});
     if(token()) headers.Authorization='Bearer '+token();
@@ -44,6 +44,33 @@
     history.replaceState(null,'','#'+tab);
     window.scrollTo(0,0);
   }
+
+  let searchedDraw=null;
+  function renderSearch(d){
+    const box=$('drawSearchResult'); if(!box) return;
+    if(!d || !d.ok){ box.textContent=(d&&d.message)||'조회 결과가 없습니다.'; return; }
+    const nums=(d.numbers||d.wins||[]).join(', ');
+    box.innerHTML='<div class="draw-search-result"><b>'+Number(d.round_no||0)+'회</b> <small>'+(d.draw_date||'')+'</small><p>'+nums+(d.bonus!==undefined?' + '+d.bonus:'')+'</p><p>'+(d.message||'조회 완료')+'</p></div>';
+  }
+  async function searchDraw(btn){
+    const round=Number($('drawSearchRound')?.value||0);
+    if(!round){ alert('조회할 회차를 입력하세요.'); $('drawSearchRound')?.focus(); return; }
+    if(btn){ btn.disabled=true; btn.dataset.oldText=btn.textContent; btn.textContent='조회 중...'; }
+    try{
+      const d=await request('/api/draws/search?round_no='+encodeURIComponent(round),{method:'GET'});
+      searchedDraw=(d&&d.ok)?d:null; renderSearch(d);
+    }catch(e){ searchedDraw=null; renderSearch({ok:false,message:'회차 조회 실패: '+(e.message||e)}); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent=btn.dataset.oldText||'회차 조회'; } }
+  }
+  function applyDraw(){
+    if(!searchedDraw){ alert('먼저 회차 조회 버튼을 눌러 조회를 완료하세요.'); return; }
+    const nums=searchedDraw.numbers||searchedDraw.wins||[];
+    if($('checkRound')) $('checkRound').value=searchedDraw.round_no||'';
+    if($('winningNums')) $('winningNums').value=nums.join(' ');
+    if($('bonusNum')) $('bonusNum').value=searchedDraw.bonus??'';
+    const info=$('autoRoundInfo'); if(info) info.textContent=(searchedDraw.round_no||'')+'회 당첨번호를 적용했습니다.';
+  }
+
   async function runStats(limit,btn){
     if(btn){ btn.disabled=true; btn.dataset.oldText=btn.textContent; btn.textContent='불러오는 중...'; }
     try{
@@ -61,7 +88,6 @@
   async function runWinning(btn){
     if(btn){ btn.disabled=true; btn.dataset.oldText=btn.textContent; btn.textContent='확인 중...'; }
     try{
-      if(typeof window.checkWinning==='function') return await window.checkWinning();
       const body={round_no:Number($('checkRound')?.value||0),winning:$('winningNums')?.value||'',bonus:Number($('bonusNum')?.value||0)};
       if(!body.round_no) throw new Error('회차를 입력해 주세요.');
       const d=await request('/api/check_winning',{method:'POST',body:JSON.stringify(body)});
@@ -78,12 +104,17 @@
       if(nav){ e.preventDefault(); e.stopImmediatePropagation(); show(nav.dataset.tab||'dashboard',(nav.textContent||'').trim()); return; }
       const stat=e.target.closest?.('.statBtn');
       if(stat){ e.preventDefault(); e.stopImmediatePropagation(); runStats(Number(stat.dataset.limit||0),stat); return; }
+      const search=e.target.closest?.('#searchDraw');
+      if(search){ e.preventDefault(); e.stopImmediatePropagation(); searchDraw(search); return; }
+      const apply=e.target.closest?.('#applySearchedDraw');
+      if(apply){ e.preventDefault(); e.stopImmediatePropagation(); applyDraw(); return; }
       const win=e.target.closest?.('#checkWinning,#saveDraw');
       if(win){ e.preventDefault(); e.stopImmediatePropagation(); runWinning(win); return; }
     },true);
-    window.addEventListener('hashchange',()=>{ const t=location.hash.slice(1); if($(t)) show(t,document.querySelector('.nav[data-tab="'+t+'"]')?.textContent?.trim()||''); });
+    $('drawSearchRound')?.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); searchDraw($('searchDraw')); } });
+        window.addEventListener('hashchange',()=>{ const t=location.hash.slice(1); if($(t)) show(t,document.querySelector('.nav[data-tab="'+t+'"]')?.textContent?.trim()||''); });
     const initial=location.hash.slice(1); if(initial && $(initial)) show(initial,document.querySelector('.nav[data-tab="'+initial+'"]')?.textContent?.trim()||'');
   }
-  window.BBLOTTO_CRITICAL={version:VERSION,showPanel:show,runStats,runWinning};
+  window.BBLOTTO_CRITICAL={version:VERSION,showPanel:show,runStats,runWinning,searchDraw,applyDraw};
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bind,{once:true}); else bind();
 })();
