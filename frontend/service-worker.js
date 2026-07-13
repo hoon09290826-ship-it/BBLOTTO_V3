@@ -1,8 +1,12 @@
-const CACHE_NAME = 'bblotto-rc11-6-button-complete';
-self.addEventListener('install', event => {
-  self.skipWaiting();
-});
+const CACHE_NAME = 'bblotto-rc11-7-button-recovery';
+self.addEventListener('install', event => { self.skipWaiting(); });
 self.addEventListener('activate', event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key)))).then(() => self.clients.claim()));
 });
-self.addEventListener('fetch', () => {});
+self.addEventListener('fetch', event => {
+  // HTML/JS/CSS는 항상 서버 최신본을 사용합니다.
+  const url = new URL(event.request.url);
+  if (event.request.method === 'GET' && (url.pathname === '/dashboard' || url.pathname === '/' || /\.(js|css)$/.test(url.pathname))) {
+    event.respondWith(fetch(event.request, {cache:'no-store'}));
+  }
+});

@@ -94,9 +94,10 @@ async def rc11_security_headers(request: Request, call_next):
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
-    if request.url.path.startswith('/api/'):
-        response.headers['Cache-Control'] = 'no-store'
+    if request.url.path.startswith('/api/') or request.url.path in {'/','/dashboard','/app.js','/login.js','/style.css','/service-worker.js'}:
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
     return response
 
 # RC11: 로그인 무차별 대입 방지(서버 프로세스 단위). DB 로그와 함께 동작합니다.
@@ -2100,6 +2101,10 @@ def login_js():
 @app.get('/manifest.json')
 def manifest_json():
     return FileResponse(FRONT/'manifest.json', media_type='application/manifest+json')
+
+@app.get('/service-worker.js')
+def service_worker_js():
+    return FileResponse(FRONT/'service-worker.js', media_type='application/javascript')
 
 @app.post('/api/login')
 def login(req:LoginReq, request:Request):
