@@ -28,21 +28,68 @@ FRONT = BASE / 'frontend'
 
 RC_VERSION = 'RC11_EXPLAINABLE_ANALYSIS_SECURITY'
 APP_VERSION = 'BBLOTTO PRO V2 STABLE'
-app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}')
+app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}', docs_url=None, redoc_url=None, openapi_url=None)
 RC3_8_VERSION = 'V2_STABLE_RC3_15'
 RC3_9_VERSION = 'V2_STABLE_RC3_15'
 RC3_10_VERSION = 'V2_STABLE_RC3_15'
 app.mount('/static', StaticFiles(directory=str(FRONT)), name='static')
 
+# RC11.3: 운영 보안 보조 함수
+_RC11_MAX_BODY_BYTES = 2 * 1024 * 1024
+_RC11_ALLOWED_METHODS_WITH_BODY = {'POST', 'PUT', 'PATCH'}
+
+def _rc113_client_ip(request: Request) -> str:
+    # Railway/Render 같은 역방향 프록시 환경에서는 Forwarded 헤더를 우선 사용합니다.
+    forwarded = str(request.headers.get('x-forwarded-for', '') or '').split(',')[0].strip()
+    if forwarded and len(forwarded) <= 64 and re.fullmatch(r'[0-9a-fA-F:.]+', forwarded):
+        return forwarded
+    return request.client.host if request.client else 'unknown'
+
+def _rc113_validate_origin(request: Request):
+    if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'} or not request.url.path.startswith('/api/'):
+        return
+    origin = str(request.headers.get('origin', '') or '').strip()
+    if not origin:
+        return
+    expected = f'{request.url.scheme}://{request.headers.get("host", "")}'.rstrip('/')
+    forwarded_proto = str(request.headers.get('x-forwarded-proto', '') or '').split(',')[0].strip()
+    if forwarded_proto:
+        expected = f'{forwarded_proto}://{request.headers.get("host", "")}'.rstrip('/')
+    if origin.rstrip('/') != expected:
+        raise HTTPException(403, '허용되지 않은 요청 출처입니다.')
+
+def validate_admin_username(username: str) -> str:
+    value = str(username or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9._-]{4,40}', value):
+        raise HTTPException(400, '관리자 아이디는 영문, 숫자, 점, 밑줄, 하이픈을 사용해 4~40자로 입력해주세요.')
+    return value
+
 # RC11: 기본 보안 헤더. 외부 리소스 없이 자체 파일만 사용하는 현재 구조에 맞춘 정책입니다.
 @app.middleware('http')
 async def rc11_security_headers(request: Request, call_next):
+    try:
+        _rc113_validate_origin(request)
+        if request.method in _RC11_ALLOWED_METHODS_WITH_BODY:
+            length = request.headers.get('content-length')
+            if length:
+                try:
+                    if int(length) > _RC11_MAX_BODY_BYTES:
+                        raise HTTPException(413, '요청 데이터가 너무 큽니다.')
+                except ValueError:
+                    raise HTTPException(400, '잘못된 Content-Length입니다.')
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={'ok':False,'error':{'type':'SecurityValidation','status_code':exc.status_code,'message':exc.detail},'path':str(request.url.path),'time':datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
     response = await call_next(request)
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    response.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
+    response.headers['X-Permitted-Cross-Domain-Policies'] = 'none'
+    response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
+    if request.url.scheme == 'https' or str(request.headers.get('x-forwarded-proto','')).lower().startswith('https'):
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
@@ -59,7 +106,7 @@ _RC11_LOGIN_WINDOW_SECONDS = 15 * 60
 _RC11_LOGIN_MAX_FAILURES = 7
 
 def _rc11_login_key(request: Request, username: str) -> str:
-    ip = request.client.host if request.client else 'unknown'
+    ip = _rc113_client_ip(request)
     return f'{ip}|{str(username or "").strip().lower()[:80]}'
 
 def _rc11_check_login_limit(request: Request, username: str):
@@ -607,14 +654,14 @@ def init_db():
         c.commit()
 
 def log_action(admin, action, detail='', request: Request|None=None):
-    ip = request.client.host if request and request.client else ''
+    ip = _rc113_client_ip(request) if request else ''
     with con() as c:
         c.execute('INSERT INTO admin_logs(admin_id,username,action,detail,ip,created_at) VALUES(?,?,?,?,?,?)', (admin.get('id') if admin else None, admin.get('username') if admin else '', action, detail, ip, now()))
         c.commit()
 
 def log_login_event(admin_id=0, username='', success=0, message='', request: Request|None=None):
     """RC3-3: 로그인 성공/실패 이력을 PostgreSQL/SQLite에 공통 저장합니다."""
-    ip = request.client.host if request and request.client else ''
+    ip = _rc113_client_ip(request) if request else ''
     ua = request.headers.get('user-agent','')[:240] if request else ''
     try:
         with con() as c:
@@ -2056,24 +2103,29 @@ def manifest_json():
 
 @app.post('/api/login')
 def login(req:LoginReq, request:Request):
-    _rc11_check_login_limit(request, req.username)
+    username = str(req.username or '').strip()[:80]
+    if not username or not req.password or len(str(req.password)) > 256:
+        raise HTTPException(400, '아이디와 비밀번호를 확인해주세요.')
+    _rc11_check_login_limit(request, username)
     with con() as c:
-        admin = c.execute('SELECT * FROM admins WHERE username=? AND is_active=1', (req.username,)).fetchone()
-        if not admin or not verify_password(req.password, admin['password_hash']):
-            _rc11_record_login_failure(request, req.username)
-            ip = request.client.host if request.client else ''
-            c.execute('INSERT INTO admin_logs(admin_id,username,action,detail,ip,created_at) VALUES(?,?,?,?,?,?)', (None, req.username, 'LOGIN_FAILED', '로그인 실패', ip, now()))
+        admin = c.execute('SELECT * FROM admins WHERE username=? AND is_active=1', (username,)).fetchone()
+        stored_hash = admin['password_hash'] if admin else 'pbkdf2_sha256$260000$00000000000000000000000000000000$' + ('0' * 64)
+        password_ok = verify_password(req.password, stored_hash)
+        if not admin or not password_ok:
+            _rc11_record_login_failure(request, username)
+            ip = _rc113_client_ip(request)
+            c.execute('INSERT INTO admin_logs(admin_id,username,action,detail,ip,created_at) VALUES(?,?,?,?,?,?)', (None, username, 'LOGIN_FAILED', '로그인 실패', ip, now()))
             c.commit()
-            log_login_event(0, req.username, 0, '로그인 실패', request)
+            log_login_event(0, username, 0, '로그인 실패', request)
             raise HTTPException(401, '아이디 또는 비밀번호가 맞지 않습니다.')
-        _rc11_clear_login_failures(request, req.username)
+        _rc11_clear_login_failures(request, username)
         # 구형 또는 평문 해시는 로그인 성공 시 자동으로 RC11 방식으로 올립니다.
         if password_needs_rehash(admin['password_hash']):
             c.execute('UPDATE admins SET password_hash=? WHERE id=?', (hash_password(req.password), admin['id']))
         # 만료 세션과 오래된 중복 세션을 정리합니다.
         c.execute("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now','localtime')")
         old_sessions = c.execute('SELECT token FROM sessions WHERE admin_id=? ORDER BY created_at DESC', (admin['id'],)).fetchall()
-        for old in old_sessions[4:]:
+        for old in old_sessions[2:]:
             c.execute('DELETE FROM sessions WHERE token=?', (old['token'],))
         timeout_minutes = 600
         row_timeout = c.execute('SELECT value FROM settings WHERE key=?', ('session_timeout_minutes',)).fetchone()
@@ -2081,7 +2133,7 @@ def login(req:LoginReq, request:Request):
             try: timeout_minutes = max(10, min(1440, int(row_timeout['value'])))
             except Exception: timeout_minutes = 600
         token=secrets.token_urlsafe(32); exp=(datetime.datetime.now()+datetime.timedelta(minutes=timeout_minutes)).strftime('%Y-%m-%d %H:%M:%S')
-        ip = request.client.host if request.client else ''
+        ip = _rc113_client_ip(request)
         ua = request.headers.get('user-agent','')[:240]
         c.execute('INSERT INTO sessions(token,admin_id,created_at,expires_at,last_seen_at,ip,user_agent) VALUES(?,?,?,?,?,?,?)', (token,admin['id'],now(),exp,now(),ip,ua))
         c.execute('UPDATE admins SET last_login_at=?, last_ip=? WHERE id=?', (now(), ip, admin['id']))
@@ -2120,8 +2172,7 @@ def update_my_account(req:MyAccountReq, request:Request, authorization: str|None
     if req.memo is not None:
         fields.append('memo=?'); vals.append(req.memo.strip())
     if req.new_password:
-        if len(req.new_password) < 4:
-            raise HTTPException(400,'새 비밀번호는 4자리 이상입니다.')
+        validate_password_strength(req.new_password)
         with con() as c:
             row=c.execute('SELECT password_hash FROM admins WHERE id=?', (admin['id'],)).fetchone()
         if not row or not verify_password(req.current_password or '', row['password_hash']):
@@ -2148,13 +2199,14 @@ def create_admin(req:AdminReq, request:Request, authorization: str|None = Header
     admin=require_admin(authorization)
     require_super_admin(admin)
     validate_password_strength(req.password)
+    username = validate_admin_username(req.username)
     try:
         with con() as c:
-            cur = c.execute('INSERT INTO admins(username,name,password_hash,is_active,created_at,updated_at,role,memo) VALUES(?,?,?,?,?,?,?,?)', (req.username.strip(),req.name.strip(),hash_password(req.password),1,now(),now(),req.role.strip() or '전체권한',req.memo.strip()))
+            cur = c.execute('INSERT INTO admins(username,name,password_hash,is_active,created_at,updated_at,role,memo) VALUES(?,?,?,?,?,?,?,?)', (username,req.name.strip(),hash_password(req.password),1,now(),now(),req.role.strip() or '전체권한',req.memo.strip()))
             c.commit()
             if getattr(cur, 'rowcount', 1) == 0:
                 raise HTTPException(400,'이미 존재하는 관리자 아이디입니다.')
-        log_action(admin,'CREATE_ADMIN',f'관리자 생성: {req.username}',request); return {'ok':True}
+        log_action(admin,'CREATE_ADMIN',f'관리자 생성: {username}',request); return {'ok':True}
     except sqlite3.IntegrityError:
         raise HTTPException(400,'이미 존재하는 관리자 아이디입니다.')
     except Exception as e:
@@ -2268,7 +2320,7 @@ def security_status(authorization: str|None = Header(default=None)):
         failed_today = c.execute('SELECT COUNT(*) c FROM admin_logs WHERE action=? AND created_at LIKE ?', ('LOGIN_FAILED', datetime.datetime.now().strftime('%Y-%m-%d')+'%')).fetchone()['c']
         timeout = c.execute('SELECT value FROM settings WHERE key=?', ('session_timeout_minutes',)).fetchone()
         warn = c.execute('SELECT value FROM settings WHERE key=?', ('auto_logout_warning_minutes',)).fetchone()
-    return {'ok':True,'active_sessions':active_sessions,'failed_login_today':failed_today,'session_timeout_minutes':int((timeout or {'value':600})['value'] or 600),'auto_logout_warning_minutes':int((warn or {'value':5})['value'] or 5),'is_super_admin':is_super_admin(admin)}
+    return {'ok':True,'active_sessions':active_sessions,'failed_login_today':failed_today,'session_timeout_minutes':int((timeout or {'value':600})['value'] or 600),'auto_logout_warning_minutes':int((warn or {'value':5})['value'] or 5),'is_super_admin':is_super_admin(admin),'password_hash':'PBKDF2-SHA256/260000','login_limit':'7회/15분','security_headers':True,'origin_check':True,'request_size_limit_mb':2}
 
 @app.get('/api/sessions')
 def list_sessions(authorization: str|None = Header(default=None)):
@@ -2287,9 +2339,19 @@ def list_sessions(authorization: str|None = Header(default=None)):
 def revoke_session(token_tail:str, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     require_super_admin(admin)
+    suffix = re.sub(r'[^A-Za-z0-9_-]', '', str(token_tail or ''))[-8:]
+    if len(suffix) != 8:
+        raise HTTPException(400, '잘못된 세션 식별자입니다.')
     with con() as c:
-        cur=c.execute('DELETE FROM sessions WHERE token LIKE ?', ('%'+Path(token_tail).name[-8:],)); deleted=cur.rowcount; c.commit()
-    log_action(admin,'REVOKE_SESSION',f'세션 종료: *{token_tail}',request)
+        matches = c.execute('SELECT token FROM sessions').fetchall()
+        tokens = [str(r['token']) for r in matches if str(r['token']).endswith(suffix)]
+        if len(tokens) > 1:
+            raise HTTPException(409, '세션 식별자가 중복됩니다. 목록을 새로고침해주세요.')
+        deleted = 0
+        if tokens:
+            cur = c.execute('DELETE FROM sessions WHERE token=?', (tokens[0],)); deleted = cur.rowcount
+        c.commit()
+    log_action(admin,'REVOKE_SESSION',f'세션 종료: *{suffix}',request)
     return {'ok':True,'deleted':deleted}
 
 

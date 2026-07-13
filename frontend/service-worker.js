@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bblotto-rc11-2-explainable-analysis';
+const CACHE_NAME = 'bblotto-rc11-3-security';
 self.addEventListener('install', event => {
   self.skipWaiting();
 });
