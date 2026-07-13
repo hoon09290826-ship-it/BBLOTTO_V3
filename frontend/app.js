@@ -694,15 +694,15 @@ function renderPagination(containerId, total, page, pageSize, onPageFn, onSizeFn
   const end = Math.min(total, page*pageSize);
   const pages=[];
   const from=Math.max(1, page-2), to=Math.min(maxPage, page+2);
-  for(let i=from;i<=to;i++) pages.push(`<button type="button" class="page-btn ${i===page?'active':''}" onclick="${onPageFn}(${i})">${i}</button>`);
+  for(let i=from;i<=to;i++) pages.push(`<button type="button" class="page-btn ${i===page?'active':''}" data-action="page-call" data-page-fn="${onPageFn}" data-page="${i}">${i}</button>`);
   box.innerHTML = `<div class="pager-info">총 ${Number(total||0).toLocaleString()}건 · ${start}-${end} 표시</div>
     <div class="pager-actions">
       <select onchange="${onSizeFn}(this.value)"><option ${pageSize==10?'selected':''}>10</option><option ${pageSize==20?'selected':''}>20</option><option ${pageSize==30?'selected':''}>30</option><option ${pageSize==50?'selected':''}>50</option><option ${pageSize==100?'selected':''}>100</option></select>
-      <button type="button" onclick="${onPageFn}(1)" ${page<=1?'disabled':''}>처음</button>
-      <button type="button" onclick="${onPageFn}(${page-1})" ${page<=1?'disabled':''}>이전</button>
+      <button type="button" data-action="page-call" data-page-fn="${onPageFn}" data-page="1" ${page<=1?'disabled':''}>처음</button>
+      <button type="button" data-action="page-call" data-page-fn="${onPageFn}" data-page="${page-1}" ${page<=1?'disabled':''}>이전</button>
       ${pages.join('')}
-      <button type="button" onclick="${onPageFn}(${page+1})" ${page>=maxPage?'disabled':''}>다음</button>
-      <button type="button" onclick="${onPageFn}(${maxPage})" ${page>=maxPage?'disabled':''}>마지막</button>
+      <button type="button" data-action="page-call" data-page-fn="${onPageFn}" data-page="${page+1}" ${page>=maxPage?'disabled':''}>다음</button>
+      <button type="button" data-action="page-call" data-page-fn="${onPageFn}" data-page="${maxPage}" ${page>=maxPage?'disabled':''}>마지막</button>
     </div>`;
 }
 window.setMemberPage=function(p){ memberPage=Number(p)||1; saveMemberFilterState(); renderMembers(); };
@@ -728,7 +728,7 @@ function renderMembers(list){
         <small class="member-owner-line">등록 관리자: <strong>${esc(registeredBy)}</strong>${m.created_at ? ' · 등록일 ' + esc(toDateInputValue(m.created_at)||m.created_at) : ''}${m.contract_end_at ? ' · 계약만료 ' + esc(toDateInputValue(m.contract_end_at)||m.contract_end_at) : ''}</small>
         <small>${esc(m.memo||'')}</small>
       </div>
-      <div class="member-actions"><button class="combo-count-badge combo-generate-copy" onclick="generateMemberAndCopy(${m.id}, this)" title="이 회원 조합수로 추천번호 생성 후 문자 자동 복사">${esc(getMemberPreferredCount(m))}조합</button><button class="sms-save-copy-badge" onclick="generateMemberCopyAndSave(${m.id}, this)" title="추천번호 생성 후 문자 복사와 보낸문자 저장을 같이 실행">복사저장</button><button onclick="selectMember(${m.id})">선택</button><button onclick="detailMember(${m.id})">상세페이지</button><button onclick="quickMemberStatus(${m.id},'활성')">활성</button><button onclick="quickMemberStatus(${m.id},'정지')">정지</button><button onclick="quickMemberStatus(${m.id},'탈퇴')">탈퇴</button><button onclick="deleteMember(${m.id})">삭제</button></div>
+      <div class="member-actions"><button class="combo-count-badge combo-generate-copy" data-action="member-generate-copy" data-member-id="${m.id}" title="이 회원 조합수로 추천번호 생성 후 문자 자동 복사">${esc(getMemberPreferredCount(m))}조합</button><button class="sms-save-copy-badge" data-action="member-generate-save" data-member-id="${m.id}" title="추천번호 생성 후 문자 복사와 보낸문자 저장을 같이 실행">복사저장</button><button data-action="member-select" data-member-id="${m.id}">선택</button><button data-action="member-detail" data-member-id="${m.id}">상세페이지</button><button data-action="member-status" data-member-id="${m.id}" data-status="활성">활성</button><button data-action="member-status" data-member-id="${m.id}" data-status="정지">정지</button><button data-action="member-status" data-member-id="${m.id}" data-status="탈퇴">탈퇴</button><button data-action="member-delete" data-member-id="${m.id}">삭제</button></div>
     </div>`;
   }).join('');
   renderPagination('memberPager', source.length, memberPage, memberPageSize, 'setMemberPage', 'setMemberPageSize');
@@ -1017,7 +1017,7 @@ function renderWinningResult(d){
         <div><b>${esc(m.lose_count||0)}</b><small>낙첨</small></div>
         <div><span class="rank-badge ${rankBadgeClass(best)}">${esc(best)}</span><small>최고당첨</small></div>
         <div><b>${Number(m.total_prize||0).toLocaleString()}원</b><small>총 당첨금</small></div>
-        <button class="icon-btn" id="winMemberArrow_${esc(key)}" onclick="toggleWinMember('${esc(key)}')">›</button>
+        <button class="icon-btn" id="winMemberArrow_${esc(key)}" data-action="winning-toggle" data-key="${esc(key)}">›</button>
       </div>
       <div class="win-member-detail" id="winMemberDetail_${esc(key)}" style="display:none">
         <div class="win-detail-head"><b>${esc(d.round_no || d.round)}회 추천 조합 상세</b><span>당첨번호 ${renderWinNumberChips(d.wins||[])} ${d.bonus?`+ <span class="num-chip bonus">${esc(d.bonus)}</span>`:''}</span></div>
@@ -1070,7 +1070,7 @@ function renderHistoryCards(items, type, memberId){
       return `<details class="detail-history sms-history" open>
         <summary>
           <span><b>${esc(r.round_no || '-')}회 문구</b><small>${esc(r.created_at || '')}</small></span>
-          <button class="danger small sms-delete-btn" onclick="event.preventDefault();event.stopPropagation();deleteSmsLog(${Number(r.id)||0}, ${Number(mid)||0})">삭제</button>
+          <button class="danger small sms-delete-btn" data-action="sms-delete" data-log-id="${Number(r.id)||0}" data-member-id="${Number(mid)||0}">삭제</button>
         </summary>
         ${formatLongText(r.body || r.message || r.content || '', 900)}
       </details>`;
@@ -1192,7 +1192,7 @@ function renderBackupList(backups){
     const file=String(b.filename||''); const safe=esc(file); const isJson=file.toLowerCase().endsWith('.json');
     const created=esc((b.created_at||'').slice(0,16) || file.replace(/^BBLOTTO.*?_BACKUP_/,'').slice(0,15));
     const reason=esc((b.reason||'manual')==='auto_daily'?'자동백업':'수동백업');
-    return `<div class="simple-backup-row"><div><b>${created}</b><small>${reason}</small></div><div><button type="button" onclick="downloadApi('/api/backups/download/${encodeURIComponent(file)}')">다운로드</button>${isJson?` <button type="button" class="danger" onclick="restoreBackup('${safe}')">복원</button>`:''}</div></div>`;
+    return `<div class="simple-backup-row"><div><b>${created}</b><small>${reason}</small></div><div><button type="button" data-action="download-api" data-url="/api/backups/download/${encodeURIComponent(file)}">다운로드</button>${isJson?` <button type="button" class="danger" data-action="backup-restore" data-file="${safe}">복원</button>`:''}</div></div>`;
   }).join('');
   setHTML('backupList', rows || '<p class="hint">백업 없음</p>');
 }
@@ -1331,13 +1331,13 @@ async function loadAdmin(){
       const self = currentAdmin && Number(a.id)===Number(currentAdmin.id);
       let actions = '';
       if(isSuper){
-        actions += `<button type="button" onclick="editAdmin(${a.id})">수정</button>`;
+        actions += `<button type="button" data-action="admin-edit" data-admin-id="${a.id}">수정</button>`;
         if(!self){
-          actions += a.is_active ? `<button type="button" onclick="toggleAdmin(${a.id},0)">비활성</button>` : `<button type="button" onclick="activateAdmin(${a.id})">활성</button>`;
-          actions += `<button type="button" class="danger" onclick="deleteAdmin(${a.id},'${esc(a.username)}')">삭제</button>`;
+          actions += a.is_active ? `<button type="button" data-action="admin-toggle" data-admin-id="${a.id}" data-active="0">비활성</button>` : `<button type="button" data-action="admin-activate" data-admin-id="${a.id}">활성</button>`;
+          actions += `<button type="button" class="danger" data-action="admin-delete" data-admin-id="${a.id}" data-username="${esc(a.username)}">삭제</button>`;
         }
       }else if(self){
-        actions += `<button type="button" onclick="changeMyPassword(${a.id})">내 비밀번호 변경</button>`;
+        actions += `<button type="button" data-action="admin-my-password" data-admin-id="${a.id}">내 비밀번호 변경</button>`;
       }else{
         actions += `<span class="hint">수정 권한 없음</span>`;
       }
@@ -1409,7 +1409,7 @@ function showMemberQuickResult(member, combos, analysis, copied=true, saved=fals
     <div class="quick-result-modal" role="dialog" aria-modal="true" aria-label="회원 추천번호 생성 결과">
       <div class="quick-result-head">
         <div><small>회원관리 간편 생성</small><h3>${esc(member?.name||'회원')} · ${esc(currentRound||'')}회차</h3></div>
-        <button type="button" class="quick-result-close" onclick="closeMemberQuickResult()">닫기</button>
+        <button type="button" class="quick-result-close" data-action="quick-result-close">닫기</button>
       </div>
       <div class="quick-result-status">추천번호 ${normalizeCombos(combos).length}조합 생성 완료${copied?' · 문자 복사 완료':''}${saved?' · 보낸문자 저장 완료':''}</div>
       <div class="quick-result-grid">
@@ -1417,8 +1417,8 @@ function showMemberQuickResult(member, combos, analysis, copied=true, saved=fals
         <section><h4>이번 회차 핵심 분석</h4><div class="quick-result-analysis">${lines||'<p>분석요약이 없습니다.</p>'}</div></section>
       </div>
       <div class="quick-result-actions">
-        <button type="button" onclick="copyTextToClipboard(document.getElementById('smsPreview')?.value || currentSms).then(()=>toast('문자 내용을 다시 복사했습니다.'))">문자 다시 복사</button>
-        <button type="button" class="primary" onclick="closeMemberQuickResult()">회원관리 계속하기</button>
+        <button type="button" data-action="quick-copy-sms">문자 다시 복사</button>
+        <button type="button" class="primary" data-action="quick-result-close">회원관리 계속하기</button>
       </div>
     </div>`;
   modal.addEventListener('click',e=>{ if(e.target===modal) closeMemberQuickResult(); });
@@ -1551,9 +1551,9 @@ window.detailMember=safe(async function(id){
       <div class="detail-card"><b>${formatMoney(summary.total_profit||0)}</b><span>누적 손익</span></div>
     </div>
     <div class="detail-section rc43-summary"><h4>적중 요약</h4><p>${esc(rankText)}</p><p>누적 당첨금 ${formatMoney(summary.total_prize||0)} · 누적 구매금 ${formatMoney(summary.total_cost||0)} · ROI ${esc(summary.roi||0)}%</p></div>
-    <div class="detail-section"><h4>회원 메모</h4><textarea id="memberMemoEdit" class="detail-edit-textarea">${esc(m.memo||'')}</textarea><div class="btnrow"><button onclick="saveMemberMemo(${m.id})" class="primary">메모 저장</button></div></div>
-    <div class="detail-section"><h4>상담 이력 추가</h4><div class="note-write"><select id="memberNoteType"><option>상담</option><option>결제</option><option>추천안내</option><option>당첨확인</option><option>기타</option></select><textarea id="memberNoteText" placeholder="상담/안내 내용을 입력하세요."></textarea><button onclick="saveMemberNote(${m.id})" class="primary">이력 추가</button></div>${renderNoteCards(d.notes)}</div>
-    <div class="detail-section"><h4>문구 이력 추가</h4><div class="note-write manual-message-write"><input id="manualSmsRound" type="number" min="1" value="${esc(currentRound||'')}" placeholder="회차"><textarea id="manualSmsBody" placeholder="회원에게 전달한 문구를 직접 입력하세요."></textarea><button onclick="saveManualSmsLog(${m.id})" class="primary">문구 추가</button></div></div>
+    <div class="detail-section"><h4>회원 메모</h4><textarea id="memberMemoEdit" class="detail-edit-textarea">${esc(m.memo||'')}</textarea><div class="btnrow"><button data-action="member-memo-save" data-member-id="${m.id}" class="primary">메모 저장</button></div></div>
+    <div class="detail-section"><h4>상담 이력 추가</h4><div class="note-write"><select id="memberNoteType"><option>상담</option><option>결제</option><option>추천안내</option><option>당첨확인</option><option>기타</option></select><textarea id="memberNoteText" placeholder="상담/안내 내용을 입력하세요."></textarea><button data-action="member-note-save" data-member-id="${m.id}" class="primary">이력 추가</button></div>${renderNoteCards(d.notes)}</div>
+    <div class="detail-section"><h4>문구 이력 추가</h4><div class="note-write manual-message-write"><input id="manualSmsRound" type="number" min="1" value="${esc(currentRound||'')}" placeholder="회차"><textarea id="manualSmsBody" placeholder="회원에게 전달한 문구를 직접 입력하세요."></textarea><button data-action="manual-sms-save" data-member-id="${m.id}" class="primary">문구 추가</button></div></div>
     <div class="detail-section"><h4>문구 이력</h4>${renderHistoryCards(d.sms_logs,'sms', m.id)}</div>
     <div class="detail-section rc43-winning"><h4>당첨 이력</h4>${renderWinningHistorySummary(d.winning_checks)}</div>
   `;
@@ -2425,6 +2425,46 @@ function bind(){
   $('rc44Refresh')?.addEventListener('click',safe(async()=>{ await loadDashboard(); await loadStats(0); await loadMembers(); toast('RC4-4 화면을 새로고침했습니다.'); }));
   document.querySelectorAll('.statBtn').forEach(b=>b.addEventListener('click',()=>loadStats(b.dataset.limit).catch(e=>alert(e.message))));
   $('pdfBtn')?.addEventListener('click',()=>window.print());
+  $('checkAiV6Cache')?.addEventListener('click', safe(checkAiV6CacheStatus));
+  $('syncAiV6FullHistory')?.addEventListener('click', safe(syncAiV6FullHistory));
+
+  // RC11.1: CSP가 인라인 onclick을 차단해도 모든 동적 버튼이 작동하도록
+  // 허용된 data-action만 처리하는 단일 이벤트 위임기를 사용한다.
+  if(!window.__bbActionRouterBound){
+    window.__bbActionRouterBound=true;
+    document.addEventListener('click', safe(async function(e){
+      const btn=e.target?.closest?.('button[data-action]');
+      if(!btn || btn.disabled) return;
+      const a=btn.dataset.action;
+      const n=(k)=>Number(btn.dataset[k]||0);
+      if(a==='download-api') return downloadApi(btn.dataset.url||'');
+      if(a==='page-call'){
+        const allowed=['setMemberPage','setWinningPage','setSmsLogPage','setRecommendationPage'];
+        const fn=btn.dataset.pageFn;
+        if(allowed.includes(fn) && typeof window[fn]==='function') return window[fn](n('page'));
+        return;
+      }
+      if(a==='member-generate-copy') return generateMemberAndCopy(n('memberId'),btn);
+      if(a==='member-generate-save') return generateMemberCopyAndSave(n('memberId'),btn);
+      if(a==='member-select') return selectMember(n('memberId'));
+      if(a==='member-detail') return detailMember(n('memberId'));
+      if(a==='member-status') return quickMemberStatus(n('memberId'),btn.dataset.status||'활성');
+      if(a==='member-delete') return deleteMember(n('memberId'));
+      if(a==='winning-toggle') return toggleWinMember(btn.dataset.key||'');
+      if(a==='sms-delete'){ e.preventDefault(); e.stopPropagation(); return deleteSmsLog(n('logId'),n('memberId')); }
+      if(a==='backup-restore') return restoreBackup(btn.dataset.file||'');
+      if(a==='admin-edit') return window.editAdmin(n('adminId'));
+      if(a==='admin-toggle') return toggleAdmin(n('adminId'),n('active'));
+      if(a==='admin-activate') return activateAdmin(n('adminId'));
+      if(a==='admin-delete') return deleteAdmin(n('adminId'),btn.dataset.username||'');
+      if(a==='admin-my-password') return changeMyPassword(n('adminId'));
+      if(a==='quick-result-close') return closeMemberQuickResult();
+      if(a==='quick-copy-sms'){ await copyTextToClipboard($('smsPreview')?.value||currentSms); return toast('문자 내용을 다시 복사했습니다.'); }
+      if(a==='member-memo-save') return saveMemberMemo(n('memberId'));
+      if(a==='member-note-save') return saveMemberNote(n('memberId'));
+      if(a==='manual-sms-save') return saveManualSmsLog(n('memberId'));
+    }));
+  }
 }
 
 async function init(){
