@@ -1393,6 +1393,33 @@ function showMemberQuickResult(member, combos, analysis, copied=true, saved=fals
   document.body.appendChild(modal);
 }
 
+async function saveCurrentRecommendation(){
+  if(currentRecId) return {id:currentRecId, saved:true, reused:true};
+  const mid=$('genMember')?.value;
+  if(!mid) throw new Error('회원을 선택해야 추천번호를 저장할 수 있습니다.');
+  const combos=normalizeCombos(currentCombos);
+  if(!combos.length) throw new Error('먼저 추천번호를 생성하세요.');
+  const member=getSelectedMember();
+  const payload={
+    member_id:Number(mid), member_name:member?.name||'', round_no:Number(currentRound||0),
+    mode:$('genMode')?.value||'balanced', combos,
+    analysis:String(currentAnalysis||''), sms:String($('smsPreview')?.value||currentSms||''),
+    details:Array.isArray(currentDetails)?currentDetails:[], engine:{}
+  };
+  const d=await api('/api/recommendations/save',{method:'POST',body:payload});
+  currentRecId=d.id||null;
+  saveWorkspaceState();
+  return d;
+}
+
+async function saveRecommendationOnly(){
+  try{
+    await saveCurrentRecommendation();
+    toast('추천번호를 저장했습니다. 당첨확인 대상에 등록되었습니다.');
+    await Promise.all([loadDashboard(),loadMembers()]);
+  }catch(e){ alert(e.message||'추천번호 저장 중 오류가 발생했습니다.'); }
+}
+
 async function saveCurrentSmsLog(){
   const mid=$('genMember')?.value;
   if(!mid){ throw new Error('회원을 선택해야 보낸문자를 저장할 수 있습니다.'); }
@@ -1408,6 +1435,7 @@ async function saveCurrentSmsLog(){
     combos:normalizeCombos(currentCombos),
     send_now:false
   };
+  await saveCurrentRecommendation();
   try{ return await api('/api/sms_log',{method:'POST',body}); }
   catch(e){ return await api('/api/sms',{method:'POST',body}); }
 }
@@ -1582,7 +1610,7 @@ async function generate(){
   setBusy('generate',true,'회원 맞춤 추천번호 분석 중...');
   try{
     const d=await api('/api/generate',{method:'POST',body});
-    currentRecId=d.id||null;
+    currentRecId=null; // RC8.18: 생성은 미리보기이며 저장 전에는 추천이력 ID가 없습니다.
     currentCombos=normalizeCombos(d.sets||d.combos||d.numbers||[]);
     if(!currentCombos.length) throw new Error('추천번호 API가 조합을 반환하지 않았습니다.');
     if(currentCombos.length !== Number(body.count)) console.warn('요청 조합수와 생성 조합수가 다릅니다.', body.count, currentCombos.length);
@@ -1598,12 +1626,12 @@ async function generate(){
     renderRecommendationAnalysis(currentRecommendationAnalysis);
     renderEngine(d.engine,currentDetails);
     refreshSmsPreview();
-    await Promise.all([loadDashboard(), loadMembers(), loadStats(0)]);
+    await loadStats(0);
     if(selectedMemberId && $('genMember')) $('genMember').value=selectedMemberId;
     refreshSmsPreview();
     if(!quickMemberGenerationMode) scrollToMessagePanel();
     saveWorkspaceState();
-    toast('추천번호 생성 및 회원 안내 문구 갱신 완료');
+    toast('추천번호 미리보기 생성 완료 · 저장 버튼을 눌러야 당첨확인 대상에 등록됩니다.');
   }catch(e){
     console.error('추천번호 생성 실패', e);
     alert('추천번호 생성 실패: '+(e.message||e));
@@ -2298,6 +2326,7 @@ function bind(){
   $('copyNums')?.addEventListener('click',()=>{navigator.clipboard?.writeText(currentCombos.map((a,i)=>`${i+1}. ${a.join(', ')}`).join('\n')); toast('번호를 복사했습니다.');});
   $('copySms')?.addEventListener('click',async()=>{try{await copyTextToClipboard($('smsPreview')?.value||currentSms); toast('회원 안내 문구를 복사했습니다.');}catch(e){alert(e.message||'복사 실패');}});
   $('copyAndSaveSmsLog')?.addEventListener('click',copyAndSaveSmsLog);
+  $('saveRecommendationOnly')?.addEventListener('click',saveRecommendationOnly);
   $('sendSmsBtn')?.addEventListener('click',()=>{refreshSmsPreview(); scrollToMessagePanel(); $('smsPreview')?.focus();});
   $('saveSmsLog')?.addEventListener('click',safe(saveSmsLog));
   $('exportSmsCsvAll')?.addEventListener('click',()=>downloadSmsCsv('all'));

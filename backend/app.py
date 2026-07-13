@@ -26,7 +26,7 @@ EXPORT_DIR = Path(os.getenv('BBLOTTO_EXPORT_DIR', str(DB_DIR / 'exports'))); EXP
 DB = DB_DIR / 'bblotto_v34.db'
 FRONT = BASE / 'frontend'
 
-RC_VERSION = 'RC6-10_SQL_PERCENT_STABLE'
+RC_VERSION = 'RC8-18_SAVED_ONLY_RECOMMENDATIONS'
 APP_VERSION = 'BBLOTTO PRO V2 STABLE'
 app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}')
 RC3_8_VERSION = 'V2_STABLE_RC3_15'
@@ -474,7 +474,8 @@ def init_db():
             'created_at':'TEXT DEFAULT ""',
             'avg_score':'REAL DEFAULT 0',
             'engine_json':'TEXT DEFAULT "{}"',
-            'details_json':'TEXT DEFAULT "[]"'
+            'details_json':'TEXT DEFAULT "[]"',
+            'explicit_saved':'INTEGER DEFAULT 0'
         }.items():
             if col not in rec_cols:
                 c.execute(f'ALTER TABLE recommendations ADD COLUMN {col} {ddl}')
@@ -1361,6 +1362,7 @@ class MemberMemoReq(BaseModel): memo:str=''
 class MemberNoteReq(BaseModel): note:str; note_type:str='상담'
 class MemberBulkStatusReq(BaseModel): member_ids:list[int]; status:str
 class GenerateReq(BaseModel): member_id:int|None=None; round_no:int=1231; count:int=10; mode:str='balanced'; fixed:str=''; excluded:str=''; exclude:str='' # exclude는 기존 프론트 호환용
+class SaveRecommendationReq(BaseModel): member_id:int|None=None; member_name:str=''; round_no:int; mode:str='balanced'; combos:list[list[int]]=[]; analysis:str=''; sms:str=''; details:list[dict]=[]; engine:dict={}
 class SmsReq(BaseModel): member_id:int|None=None; member_name:str=''; phone:str=''; round_no:int; body:str; combos:list[list[int]]=[]; send_now:bool=False
 class WinReq(BaseModel): round_no:int; win_numbers:list[int]=[]; bonus:int=0; combos:list[list[int]]=[]; member_id:int|None=None; member_name:str=''
 class DrawReq(BaseModel): round_no:int; draw_date:str=''; numbers:list[int]; bonus:int
@@ -2759,34 +2761,52 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     engine['rc38_report']=rc38_generation_report(combos, details, safe_round, safe_mode)
     engine['top3']=rc37_top3(combos, details)
     engine['quality_guide']=f'{member_grade} 관리 기준 · 최근 흐름과 누적 통계를 반영한 맞춤 추천'
+    # RC8.18: 번호 생성 단계에서는 DB에 저장하지 않습니다.
+    # 추천번호 저장/보낸문자 저장을 명시적으로 실행한 경우에만 recommendations에 등록됩니다.
+    log_action(admin,'GENERATE_PREVIEW_RC8_18',f'{safe_round}회차 {len(combos)}조합 미리보기 생성 · 저장 안 함',request)
+    return {'id':None,'saved':False,'round_no':safe_round,'round':safe_round,'sets':combos,'combos':combos,'details':details,'top3':engine.get('top3',[]),'engine':engine,'analysis':analysis,'sms':sms,'member_id':member_id,'member_name':member_name,'member_notice':sms,'quality_guide':engine.get('quality_guide')}
+
+
+@app.post('/api/recommendations/save')
+def save_recommendation(req:SaveRecommendationReq, request:Request, authorization: str|None = Header(default=None)):
+    admin=require_admin(authorization)
+    combos=[parse_nums(c) for c in (req.combos or [])]
+    combos=[c for c in combos if len(c)==6]
+    if not combos:
+        raise HTTPException(400,'저장할 추천번호가 없습니다.')
+    member_id=req.member_id
+    member_name=(req.member_name or '').strip()
+    member_grade='일반'
     with con() as c:
-        # Render에 남아 있는 오래된 DB도 요청 시점에 한 번 더 보정합니다.
-        rec_cols=table_cols(c, 'recommendations')
+        member_id, resolved_name = rc312_resolve_member(c, member_id, member_name)
+        member_name = resolved_name or member_name
+        if member_id:
+            m=c.execute('SELECT grade FROM members WHERE id=?',(member_id,)).fetchone()
+            member_grade=rc45_grade_label(m['grade'] if m else '일반')
+        rec_cols=table_cols(c,'recommendations')
         for col, ddl in {
             'member_id':'INTEGER','member_name':'TEXT DEFAULT ""','round_no':'INTEGER DEFAULT 0',
             'mode':'TEXT DEFAULT "balanced"','count':'INTEGER DEFAULT 0','numbers':'TEXT DEFAULT "[]"','analysis':'TEXT DEFAULT ""','sms':'TEXT DEFAULT ""',
             'created_by':'INTEGER DEFAULT 0','created_at':'TEXT DEFAULT ""',
-            'avg_score':'REAL DEFAULT 0','grade':'TEXT DEFAULT "일반"','engine_json':'TEXT DEFAULT "{}"','details_json':'TEXT DEFAULT "[]"'
+            'avg_score':'REAL DEFAULT 0','grade':'TEXT DEFAULT "일반"','engine_json':'TEXT DEFAULT "{}"','details_json':'TEXT DEFAULT "[]"','explicit_saved':'INTEGER DEFAULT 0'
         }.items():
             if col not in rec_cols:
                 c.execute(f'ALTER TABLE recommendations ADD COLUMN {col} {ddl}')
-        rec_cols=table_cols(c, 'recommendations')
+        rec_cols=table_cols(c,'recommendations')
+        engine=req.engine or {}
         data={
-            'member_id':member_id,'member_name':member_name,'round_no':safe_round,'mode':safe_mode,'count':len(combos),
-            'numbers':json.dumps(combos,ensure_ascii=False),'analysis':analysis,'sms':sms,'created_by':admin['id'],'created_at':now(),
-            'avg_score':engine.get('avg_score',0),'grade':member_grade,'engine_json':json.dumps(engine,ensure_ascii=False),'details_json':json.dumps(details,ensure_ascii=False)
+            'member_id':member_id,'member_name':member_name,'round_no':max(1,int(req.round_no or 1)),
+            'mode':req.mode or 'balanced','count':len(combos),'numbers':json.dumps(combos,ensure_ascii=False),
+            'analysis':clean_template_text(req.analysis or ''),'sms':clean_template_text(req.sms or ''),
+            'created_by':admin['id'],'created_at':now(),'avg_score':float(engine.get('avg_score') or 0),
+            'grade':member_grade,'engine_json':json.dumps(engine,ensure_ascii=False),'details_json':json.dumps(req.details or [],ensure_ascii=False),'explicit_saved':1
         }
-        cols=[k for k in data.keys() if k in rec_cols]
-        cur=c.execute('INSERT INTO recommendations('+','.join(cols)+') VALUES('+','.join(['?']*len(cols))+')', [data[k] for k in cols])
+        cols=[k for k in data if k in rec_cols]
+        cur=c.execute('INSERT INTO recommendations('+','.join(cols)+') VALUES('+','.join(['?']*len(cols))+')',[data[k] for k in cols])
         rid=cur.lastrowid
-        try:
-            c.execute('CREATE TABLE IF NOT EXISTS engine_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, recommendation_id INTEGER DEFAULT 0, round_no INTEGER DEFAULT 0, member_id INTEGER DEFAULT 0, mode TEXT DEFAULT "balanced", count INTEGER DEFAULT 0, candidate_count INTEGER DEFAULT 0, selected_count INTEGER DEFAULT 0, avg_score REAL DEFAULT 0, max_score REAL DEFAULT 0, min_score REAL DEFAULT 0, engine_version TEXT DEFAULT "", created_by INTEGER DEFAULT 0, created_at TEXT)')
-            c.execute('INSERT INTO engine_runs(recommendation_id,round_no,member_id,mode,count,candidate_count,selected_count,avg_score,max_score,min_score,engine_version,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (rid, safe_round, member_id or 0, safe_mode, len(combos), engine.get('candidate_count',0), engine.get('selected_count',len(combos)), engine.get('avg_score',0), engine.get('max_score',0), engine.get('min_score',0), engine.get('engine_version') or engine.get('version') or 'BBLOTTO_PRO_V2_STABLE_RC3_12', admin['id'], now()))
-        except Exception:
-            pass
         c.commit()
-    log_action(admin,'GENERATE_RC3_12',f'{safe_round}회차 {len(combos)}조합 생성 · 평균 {engine.get("avg_score",0)}점 · 최대중복 {engine.get("rc38_report",{}).get("max_overlap",0)}',request)
-    return {'id':rid,'round_no':safe_round,'round':safe_round,'sets':combos,'combos':combos,'details':details,'top3':engine.get('top3',[]),'engine':engine,'analysis':analysis,'sms':sms,'member_id':member_id,'member_name':member_name,'member_notice':sms,'quality_guide':engine.get('quality_guide')}
+    log_action(admin,'SAVE_RECOMMENDATION_RC8_18',f'{data["round_no"]}회차 {len(combos)}조합 저장 · {member_name or "회원 미선택"}',request)
+    return {'ok':True,'saved':True,'id':rid,'member_id':member_id,'member_name':member_name,'round_no':data['round_no'],'count':len(combos)}
 
 
 @app.get('/api/recommendations')
@@ -3058,7 +3078,7 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
         _rc315_clean_future_draws_in_conn(c)
         c.execute('INSERT OR REPLACE INTO draws(round_no,draw_date,numbers,bonus,source,updated_at) VALUES(?,?,?,?,?,?)', (req.round_no, req.draw_date or draw_date_for_round(req.round_no), json.dumps(wins), int(req.bonus), (resolved.get('source') if resolved else 'manual_auto'), now()))
         # RC4-4 개선: 공동추천/회원 미지정 추천은 당첨확인 결과에서 제외하고, 회원별로 묶어서 확인합니다.
-        rec_where = 'r.round_no=? AND COALESCE(r.member_id,0)>0'
+        rec_where = 'r.round_no=? AND COALESCE(r.member_id,0)>0 AND COALESCE(r.explicit_saved,0)=1'
         rec_args = [req.round_no]
         if not is_super_admin(admin):
             rec_where += ' AND COALESCE(m.created_by,0)=?'
@@ -3074,6 +3094,11 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
             WHERE {rec_where}
             ORDER BY m.name ASC, r.id DESC
         ''', rec_args).fetchall()
+        # RC8.18: 과거 '생성만 한 조합'으로 만들어진 당첨확인 결과를 같은 회차/회원 기준으로 정리합니다.
+        explicit_member_ids=sorted({int(r['member_id'] or 0) for r in recs if int(r['member_id'] or 0)>0})
+        if explicit_member_ids:
+            marks=','.join(['?']*len(explicit_member_ids))
+            c.execute(f'DELETE FROM winning_checks WHERE round_no=? AND member_id IN ({marks})', [req.round_no, *explicit_member_ids])
         checked=[]
         member_map={}
         rank_order={'1등':1,'2등':2,'3등':3,'4등':4,'5등':5,'낙첨':9}
