@@ -2837,13 +2837,13 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     analysis=clean_template_text(build_analysis_text(safe_round, st, safe_mode, req.fixed, excluded_value, details))
     sms=clean_template_text(build_sms(member_name, safe_round, combos, analysis, details))
     engine=_engine_summary(details, st)
-    engine['phase']='RC7-29'
+    engine['phase']='RC11.2'
     engine['member_grade']=member_grade
     engine['grade_strength']=rc45_grade_strength_text(member_grade)
     engine['engine_label']=_rc729_engine_name(member_grade)
     engine['rc38_report']=rc38_generation_report(combos, details, safe_round, safe_mode)
     engine['top3']=rc37_top3(combos, details)
-    engine['quality_guide']=f'{member_grade} 관리 기준 · 최근 흐름과 누적 통계를 반영한 맞춤 추천'
+    engine['quality_guide']=f'{member_grade} 관리 기준 · 1회차부터 최신 회차까지의 기록과 실제 조합 특징을 반영한 설명형 추천'
     # RC8.18: 번호 생성 단계에서는 DB에 저장하지 않습니다.
     # 추천번호 저장/보낸문자 저장을 명시적으로 실행한 경우에만 recommendations에 등록됩니다.
     log_action(admin,'GENERATE_PREVIEW_RC8_18',f'{safe_round}회차 {len(combos)}조합 미리보기 생성 · 저장 안 함',request)
