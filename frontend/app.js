@@ -2322,7 +2322,97 @@ window.editAdmin=safe(async function(id){
   await loadAdmin();
 });
 
+
+// RC11.6: 캡처 단계의 단일 정적 버튼 라우터.
+// 기존 직접 바인딩 중 하나가 초기화 오류로 중단되어도 메뉴/통계/당첨확인 등
+// 핵심 버튼은 독립적으로 작동한다. 처리한 클릭은 버블 단계로 보내지 않아 중복 실행을 막는다.
+function installRc116StaticButtonRouter(){
+  if(window.__bbRc116StaticRouterBound) return;
+  window.__bbRc116StaticRouterBound=true;
+
+  const run=(fn, ...args)=>{
+    try{
+      const out=typeof fn==='function' ? fn(...args) : null;
+      if(out && typeof out.catch==='function') out.catch(err=>{ console.error(err); alert(err?.message||'처리 중 오류가 발생했습니다.'); });
+      return out;
+    }catch(err){ console.error(err); alert(err?.message||'처리 중 오류가 발생했습니다.'); }
+  };
+
+  document.addEventListener('click', function(e){
+    const btn=e.target?.closest?.('button');
+    if(!btn || btn.disabled) return;
+
+    // 왼쪽 주 메뉴는 어떤 초기화 실패가 있어도 항상 전환한다.
+    if(btn.classList.contains('nav') && btn.dataset.tab){
+      e.preventDefault(); e.stopImmediatePropagation();
+      const tab=btn.dataset.tab;
+      openPanel(tab, btn.textContent.trim());
+      if(tab==='dashboard') run(loadDashboard);
+      if(tab==='members') run(loadMembers);
+      if(tab==='winning') run(loadDraws);
+      if(tab==='stats') run(loadStats,0);
+      if(tab==='account') run(loadMyAccount);
+      if(tab==='admin') run(loadAdmin);
+      return;
+    }
+
+    // data-action 동적 버튼은 기존 보안 라우터가 처리한다.
+    if(btn.dataset.action) return;
+
+    const id=btn.id||'';
+    const handlers={
+      logout: async()=>{ try{await api('/api/logout',{method:'POST'});}catch(_e){} localStorage.removeItem('bb_v34_token'); location.href='/'; },
+      rc44AutoUpdate: rc44RunAutoUpdate,
+      rc44Refresh: async()=>{ await Promise.allSettled([loadDashboard(),loadStats(0),loadMembers(),loadDraws()]); toast('화면을 새로고침했습니다.'); },
+      generate,
+      autoTemplate,
+      resetTemplate,
+      clearTemplate,
+      saveTemplate,
+      copyNums: ()=>{ navigator.clipboard?.writeText(currentCombos.map((a,i)=>`${i+1}. ${a.join(', ')}`).join('\n')); toast('번호를 복사했습니다.'); },
+      copySms: async()=>{ await copyTextToClipboard($('smsPreview')?.value||currentSms); toast('회원 안내 문구를 복사했습니다.'); },
+      saveRecommendationOnly,
+      copyAndSaveSmsLog,
+      saveSmsLog,
+      sendSmsBtn: ()=>{ refreshSmsPreview(); scrollToMessagePanel(); $('smsPreview')?.focus(); },
+      addMember,
+      saveMemberBtn: saveMember,
+      clearMember: ()=>{ ['mId','mName','mPhone','mMemo'].forEach(x=>setValue(x,'')); setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractPeriod','12'); setValue('mContractEndAt',''); setValue('mPreferredCount','10'); refreshMemberAdminSelect(); },
+      memberDetailBack: ()=>openPanel('members','회원 관리'),
+      saveDraw,
+      checkWinning,
+      searchDraw: searchDrawByRound,
+      applySearchedDraw: applySearchedDrawToCheck,
+      saveMyProfile,
+      saveMyPassword,
+      openAdminModal: openAdminCreateModal,
+      closeAdminModal: closeAdminCreateModal,
+      cancelAdminModal: closeAdminCreateModal,
+      addAdmin,
+      createBackup,
+      checkAiV6Cache: checkAiV6CacheStatus,
+      syncAiV6FullHistory,
+      saveSessionTimeout,
+      pdfBtn: ()=>window.print()
+    };
+    if(Object.prototype.hasOwnProperty.call(handlers,id)){
+      e.preventDefault(); e.stopImmediatePropagation();
+      return run(handlers[id]);
+    }
+
+    if(btn.classList.contains('statBtn')){
+      e.preventDefault(); e.stopImmediatePropagation();
+      return run(loadStats, Number(btn.dataset.limit||0));
+    }
+    if(btn.classList.contains('admin-tab-btn')){
+      e.preventDefault(); e.stopImmediatePropagation();
+      return run(switchAdminPanel, btn.dataset.adminPanel||'admins');
+    }
+  }, true);
+}
+
 function bind(){
+  installRc116StaticButtonRouter();
   document.querySelectorAll('.nav').forEach(btn=>btn.addEventListener('click',()=>{
     openPanel(btn.dataset.tab, btn.textContent.trim());
     if(btn.dataset.tab==='stats') loadStats(0).catch(console.error);

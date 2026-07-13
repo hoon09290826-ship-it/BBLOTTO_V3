@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bblotto-rc11-5-final-stable';
+const CACHE_NAME = 'bblotto-rc11-6-button-complete';
 self.addEventListener('install', event => {
   self.skipWaiting();
 });
