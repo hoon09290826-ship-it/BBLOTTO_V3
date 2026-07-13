@@ -288,10 +288,3 @@ button{background:#151515;border:1px solid rgba(212,175,55,.35);border-radius:10
 .quick-result-row{display:grid;grid-template-columns:28px 1fr;gap:9px;padding:8px 4px;border-bottom:1px solid rgba(255,255,255,.08)}.quick-result-row:last-child{border-bottom:0}.quick-result-row b{color:#d9b53a}.quick-result-row span{font-weight:800;letter-spacing:.3px}
 .quick-result-analysis p{margin:0 0 10px;line-height:1.7;color:#eee}.quick-result-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:17px}
 @media(max-width:760px){.quick-result-overlay{padding:10px}.quick-result-modal{padding:15px}.quick-result-grid{grid-template-columns:1fr}.quick-result-head h3{font-size:19px}}
-
-/* RC11.8 FINAL BUTTON SHIELD: hidden modals must never cover the page */
-.modal-backdrop[aria-hidden="true"],
-.modal-backdrop:not(.is-open){display:none!important;pointer-events:none!important;}
-.modal-backdrop.is-open{display:flex!important;pointer-events:auto!important;}
-body:not(.modal-open) .modal-backdrop{display:none!important;pointer-events:none!important;}
-body.modal-open .modal-backdrop.is-open{display:flex!important;pointer-events:auto!important;}

@@ -1206,9 +1206,8 @@ function openAdminCreateModal(){
   if(!m) return;
   // RC5.4 FIX: aria-hidden이 남아있는 상태에서 input에 포커스가 잡히면
   // Chrome이 클릭/포커스 처리를 막는 경우가 있어 열린 상태에서는 완전히 제거한다.
+  m.style.display='flex';
   m.classList.add('is-open');
-  document.body.classList.add('modal-open');
-  m.style.setProperty('display','flex','important');
   m.removeAttribute('aria-hidden');
   m.removeAttribute('inert');
   m.inert=false;
@@ -1222,8 +1221,7 @@ function closeAdminCreateModal(){
   // 닫기 전에 모달 내부 포커스를 먼저 빼야 aria-hidden 경고와 클릭 먹통을 방지한다.
   if(m.contains(document.activeElement)) document.activeElement.blur();
   m.classList.remove('is-open');
-  document.body.classList.remove('modal-open');
-  m.style.setProperty('display','none','important');
+  m.style.display='none';
   m.setAttribute('aria-hidden','true');
 }
 window.openAdminCreateModal=openAdminCreateModal;
@@ -2325,16 +2323,6 @@ window.editAdmin=safe(async function(id){
 });
 
 function bind(){
-  // RC11.8: page-wide transparent overlays are force-closed on startup.
-  document.body.classList.remove('modal-open');
-  document.querySelectorAll('.modal-backdrop').forEach(m=>{
-    if(!m.classList.contains('is-open')){
-      m.setAttribute('aria-hidden','true');
-      m.style.setProperty('display','none','important');
-      m.style.setProperty('pointer-events','none','important');
-    }
-  });
-  document.querySelectorAll('button:not([type])').forEach(b=>b.type='button');
   // RC11.7: 왼쪽 메뉴는 한 개의 위임 라우터로만 처리합니다.
   // 기존 브라우저 캐시나 일부 초기 로딩 실패가 있어도 메뉴 전환은 항상 동작합니다.
   if(!window.__bbPrimaryNavBound){
@@ -2345,13 +2333,6 @@ function bind(){
       e.preventDefault();
       e.stopPropagation();
       const tab=String(btn.dataset.tab||'dashboard');
-      document.body.classList.remove('modal-open');
-      document.querySelectorAll('.modal-backdrop').forEach(m=>{
-        m.classList.remove('is-open');
-        m.setAttribute('aria-hidden','true');
-        m.style.setProperty('display','none','important');
-        m.style.setProperty('pointer-events','none','important');
-      });
       openPanel(tab, btn.textContent.trim());
       const loaders={
         dashboard:()=>loadDashboard(),

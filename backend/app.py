@@ -2094,6 +2094,10 @@ def style_css():
 def app_js():
     return FileResponse(FRONT/'app.js', media_type='application/javascript')
 
+@app.get('/button-recovery.js')
+def button_recovery_js():
+    return FileResponse(FRONT/'button-recovery.js', media_type='application/javascript', headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'})
+
 @app.get('/login.js')
 def login_js():
     return FileResponse(FRONT/'login.js', media_type='application/javascript')
