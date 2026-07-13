@@ -3083,7 +3083,7 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
         if not is_super_admin(admin):
             rec_where += ' AND COALESCE(m.created_by,0)=?'
             rec_args.append(int(admin.get('id') or 0))
-        recs = c.execute(f'''
+        recs = [dict(r) for r in c.execute(f'''
             SELECT r.id,
                    r.member_id,
                    COALESCE(NULLIF(r.member_name,''), m.name, '회원명 미확인') AS member_name,
@@ -3093,8 +3093,51 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
             INNER JOIN members m ON m.id = r.member_id
             WHERE {rec_where}
             ORDER BY m.name ASC, r.id DESC
-        ''', rec_args).fetchall()
-        # RC8.18: 과거 '생성만 한 조합'으로 만들어진 당첨확인 결과를 같은 회차/회원 기준으로 정리합니다.
+        ''', rec_args).fetchall()]
+
+        # RC8.19: 기존 버전에서 '복사저장/보낸문자 저장/문구이력 저장'으로 남긴 번호도
+        # 당첨확인 대상으로 복구합니다. sms_logs.combos가 비어 있지 않은 기록만 사용하며,
+        # 추천번호 저장 기록과 같은 조합은 회원별로 중복 제거합니다.
+        sms_where = "s.round_no=? AND COALESCE(s.member_id,0)>0 AND COALESCE(s.combos,'') NOT IN ('','[]')"
+        sms_args = [req.round_no]
+        if not is_super_admin(admin):
+            sms_where += ' AND COALESCE(m.created_by,0)=?'
+            sms_args.append(int(admin.get('id') or 0))
+        sms_rows = c.execute(f'''
+            SELECT s.id, s.member_id,
+                   COALESCE(NULLIF(s.member_name,''), m.name, '회원명 미확인') AS member_name,
+                   s.round_no, s.combos AS numbers
+            FROM sms_logs s
+            INNER JOIN members m ON m.id=s.member_id
+            WHERE {sms_where}
+            ORDER BY m.name ASC, s.id DESC
+        ''', sms_args).fetchall()
+        recs.extend({
+            'id': -int(r['id'] or 0), 'member_id': r['member_id'],
+            'member_name': r['member_name'], 'round_no': r['round_no'],
+            'numbers': r['numbers']
+        } for r in sms_rows)
+
+        deduped_recs=[]
+        seen_saved=set()
+        for rec in recs:
+            try:
+                parsed=[parse_nums(x) for x in json.loads(rec.get('numbers') or '[]')]
+                parsed=[x for x in parsed if len(x)==6]
+            except Exception:
+                parsed=[]
+            if not parsed:
+                continue
+            canonical=json.dumps(parsed, ensure_ascii=False, separators=(',',':'))
+            key=(int(rec.get('member_id') or 0), canonical)
+            if key in seen_saved:
+                continue
+            seen_saved.add(key)
+            rec['numbers']=json.dumps(parsed, ensure_ascii=False)
+            deduped_recs.append(rec)
+        recs=deduped_recs
+
+        # 과거 '생성만 한 조합'으로 만들어진 당첨확인 결과를 같은 회차/회원 기준으로 정리합니다.
         explicit_member_ids=sorted({int(r['member_id'] or 0) for r in recs if int(r['member_id'] or 0)>0})
         if explicit_member_ids:
             marks=','.join(['?']*len(explicit_member_ids))
