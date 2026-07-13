@@ -26,7 +26,7 @@ EXPORT_DIR = Path(os.getenv('BBLOTTO_EXPORT_DIR', str(DB_DIR / 'exports'))); EXP
 DB = DB_DIR / 'bblotto_v34.db'
 FRONT = BASE / 'frontend'
 
-RC_VERSION = 'RC8-18_SAVED_ONLY_RECOMMENDATIONS'
+RC_VERSION = 'RC9_AI_V7_STATISTICAL_ANALYSIS'
 APP_VERSION = 'BBLOTTO PRO V2 STABLE'
 app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}')
 RC3_8_VERSION = 'V2_STABLE_RC3_15'
@@ -7528,9 +7528,9 @@ except Exception as _v5_sync_import_error:
 # - 추천번호 생성은 최종적으로 ai_engine_v6만 사용
 # =========================================================
 try:
-    from .ai_engine_v6 import make_premium_combos as make_premium_combos
-    from .ai_engine_v6 import latest_stats as latest_stats
-    from .ai_engine_v6 import get_analysis_cache as _ai_v6_get_analysis_cache
+    from .ai_engine_v7 import make_premium_combos as make_premium_combos
+    from .ai_engine_v7 import latest_stats as latest_stats
+    from .ai_engine_v7 import get_analysis_cache as _ai_v6_get_analysis_cache
     BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_AI_V6_DB_FULL_HISTORY_CACHE'
 
     @app.get('/api/ai-engine/v6-cache')
@@ -7561,7 +7561,7 @@ except Exception as _v6_import_error:
     print('[BBLOTTO] AI V6 engine import failed:', _v6_import_error)
 
 try:
-    from .ai_engine_v6 import sync_official_full_history as _ai_v6_sync_official_full_history
+    from .ai_engine_v7 import sync_official_full_history as _ai_v6_sync_official_full_history
 
     @app.post('/api/ai-engine/v6-sync-full')
     def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int = 1231):
@@ -7577,8 +7577,8 @@ except Exception as _v6_sync_import_error:
 # - 주소 직접 입력 시 Not Found 대신 안내/실행 가능 여부 반환
 # =========================================================
 try:
-    from .ai_engine_v6 import sync_official_full_history as _bb_v6_sync_full_ui
-    from .ai_engine_v6 import get_analysis_cache as _bb_v6_cache_ui
+    from .ai_engine_v7 import sync_official_full_history as _bb_v6_sync_full_ui
+    from .ai_engine_v7 import get_analysis_cache as _bb_v6_cache_ui
 
     @app.post('/api/admin/ai-v6/full-sync')
     def admin_ai_v6_full_sync(authorization: str|None = Header(default=None), max_round: int = 1231):
@@ -7606,7 +7606,7 @@ try:
         }
 
 
-    from .ai_engine_v6 import sync_official_history_step as _bb_v6_sync_step_ui
+    from .ai_engine_v7 import sync_official_history_step as _bb_v6_sync_step_ui
 
     @app.post('/api/admin/ai-v6/full-sync-step')
     def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int = 1231, chunk_size: int = 40):
@@ -7696,3 +7696,11 @@ def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
         lines.append(f'최종 조합 평균 분석점수는 {avg_score}점으로, 누적 안정성과 최근 변화 가능성이 함께 유지되는 조합을 선정했습니다.')
     return '\n'.join(lines[:5])
 # ===================== /RC8.15 EXPERT ANALYSIS SUMMARY =====================
+
+
+# ===== RC9 AI V7 integrity audit =====
+@app.get('/api/ai-engine/rc9-audit')
+def rc9_engine_audit(authorization: str|None = Header(default=None)):
+    require_admin(authorization)
+    from .ai_engine_v7 import rc9_audit
+    return rc9_audit()
