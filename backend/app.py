@@ -94,7 +94,7 @@ async def rc11_security_headers(request: Request, call_next):
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
-    if request.url.path.startswith('/api/') or request.url.path in {'/','/dashboard','/app.js','/nav-core.js','/login.js','/style.css','/service-worker.js'}:
+    if request.url.path.startswith('/api/') or request.url.path in {'/','/dashboard','/app.js','/nav-core.js','/critical-actions.js','/login.js','/style.css','/service-worker.js'}:
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -2097,6 +2097,10 @@ def app_js():
 @app.get('/nav-core.js')
 def nav_core_js():
     return FileResponse(FRONT/'nav-core.js', media_type='application/javascript')
+
+@app.get('/critical-actions.js')
+def critical_actions_js():
+    return FileResponse(FRONT/'critical-actions.js', media_type='application/javascript')
 
 @app.get('/login.js')
 def login_js():
