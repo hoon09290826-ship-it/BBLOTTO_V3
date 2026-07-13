@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pathlib import Path
-import sqlite3, json, random, re, itertools, datetime, secrets, hashlib, hmac, io, csv, collections, shutil, os, urllib.request, urllib.parse
+import sqlite3, json, random, re, itertools, datetime, secrets, hashlib, hmac, io, csv, collections, shutil, os, urllib.request, urllib.parse, time, threading
 
 BASE = Path(__file__).resolve().parents[1]
 
@@ -26,13 +26,61 @@ EXPORT_DIR = Path(os.getenv('BBLOTTO_EXPORT_DIR', str(DB_DIR / 'exports'))); EXP
 DB = DB_DIR / 'bblotto_v34.db'
 FRONT = BASE / 'frontend'
 
-RC_VERSION = 'RC9_AI_V7_STATISTICAL_ANALYSIS'
+RC_VERSION = 'RC11_EXPLAINABLE_ANALYSIS_SECURITY'
 APP_VERSION = 'BBLOTTO PRO V2 STABLE'
 app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}')
 RC3_8_VERSION = 'V2_STABLE_RC3_15'
 RC3_9_VERSION = 'V2_STABLE_RC3_15'
 RC3_10_VERSION = 'V2_STABLE_RC3_15'
 app.mount('/static', StaticFiles(directory=str(FRONT)), name='static')
+
+# RC11: 기본 보안 헤더. 외부 리소스 없이 자체 파일만 사용하는 현재 구조에 맞춘 정책입니다.
+@app.middleware('http')
+async def rc11_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    if request.url.path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Pragma'] = 'no-cache'
+    return response
+
+# RC11: 로그인 무차별 대입 방지(서버 프로세스 단위). DB 로그와 함께 동작합니다.
+_RC11_LOGIN_LOCK = threading.Lock()
+_RC11_LOGIN_ATTEMPTS = collections.defaultdict(list)
+_RC11_LOGIN_WINDOW_SECONDS = 15 * 60
+_RC11_LOGIN_MAX_FAILURES = 7
+
+def _rc11_login_key(request: Request, username: str) -> str:
+    ip = request.client.host if request.client else 'unknown'
+    return f'{ip}|{str(username or "").strip().lower()[:80]}'
+
+def _rc11_check_login_limit(request: Request, username: str):
+    key = _rc11_login_key(request, username)
+    current = time.time()
+    with _RC11_LOGIN_LOCK:
+        recent = [t for t in _RC11_LOGIN_ATTEMPTS.get(key, []) if current - t < _RC11_LOGIN_WINDOW_SECONDS]
+        _RC11_LOGIN_ATTEMPTS[key] = recent
+        if len(recent) >= _RC11_LOGIN_MAX_FAILURES:
+            retry = max(1, int(_RC11_LOGIN_WINDOW_SECONDS - (current - recent[0])))
+            raise HTTPException(429, f'로그인 시도가 너무 많습니다. 약 {max(1, retry // 60)}분 후 다시 시도해주세요.')
+
+def _rc11_record_login_failure(request: Request, username: str):
+    key = _rc11_login_key(request, username)
+    with _RC11_LOGIN_LOCK:
+        _RC11_LOGIN_ATTEMPTS[key].append(time.time())
+
+def _rc11_clear_login_failures(request: Request, username: str):
+    key = _rc11_login_key(request, username)
+    with _RC11_LOGIN_LOCK:
+        _RC11_LOGIN_ATTEMPTS.pop(key, None)
 
 
 # RC2 Sprint 6: 표준 오류 응답 핸들러
@@ -307,27 +355,51 @@ def clean_template_text(value):
             return clean_template_text(obj[key])
     return ''
 
-def hash_password(password: str, salt: str|None=None) -> str:
+def hash_password(password: str, salt: str|None=None, iterations: int=260000) -> str:
     salt = salt or secrets.token_hex(16)
-    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 120000)
-    return f'pbkdf2_sha256${salt}${dk.hex()}'
+    iterations = max(120000, int(iterations or 260000))
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations)
+    return f'pbkdf2_sha256${iterations}${salt}${dk.hex()}'
 
 def verify_password(password: str, stored: str) -> bool:
     try:
-        # 최신 방식: pbkdf2_sha256$salt$digest
+        stored = str(stored or '')
+        # RC11 방식: 알고리즘$반복횟수$salt$digest
         if stored.startswith('pbkdf2_sha256$'):
-            _, salt, digest = stored.split('$', 2)
-            return hmac.compare_digest(hash_password(password, salt).split('$', 2)[2], digest)
-        # 구버전 호환: salt$digest 형태가 남아 있어도 로그인 가능
+            parts = stored.split('$')
+            if len(parts) == 4:
+                _, iterations, salt, digest = parts
+                calc = hash_password(password, salt, int(iterations)).split('$', 3)[3]
+                return hmac.compare_digest(calc, digest)
+            # RC10 이하 방식: 알고리즘$salt$digest (120,000회)
+            if len(parts) == 3:
+                _, salt, digest = parts
+                dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 120000).hex()
+                return hmac.compare_digest(dk, digest)
+        # 구버전 호환: salt$digest
         if '$' in stored:
             salt, digest = stored.split('$', 1)
             dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 120000).hex()
-            if hmac.compare_digest(dk, digest):
-                return True
-        # 아주 초기 테스트 버전 호환
-        return hmac.compare_digest(stored, password)
+            return hmac.compare_digest(dk, digest)
+        # 아주 초기 DB만 1회 로그인 허용하며 성공 즉시 RC11 해시로 교체합니다.
+        return bool(stored) and hmac.compare_digest(stored, password)
     except Exception:
         return False
+
+def password_needs_rehash(stored: str) -> bool:
+    try:
+        parts = str(stored or '').split('$')
+        return not (len(parts) == 4 and parts[0] == 'pbkdf2_sha256' and int(parts[1]) >= 260000)
+    except Exception:
+        return True
+
+def validate_password_strength(password: str):
+    value = str(password or '')
+    if len(value) < 10:
+        raise HTTPException(400, '비밀번호는 10자 이상으로 설정해주세요.')
+    groups = sum(bool(re.search(pattern, value)) for pattern in (r'[A-Z]', r'[a-z]', r'\d', r'[^A-Za-z0-9]'))
+    if groups < 3:
+        raise HTTPException(400, '비밀번호에는 영문 대·소문자, 숫자, 특수문자 중 3종류 이상을 사용해주세요.')
 
 def parse_nums(value):
     if value is None: return []
@@ -1984,14 +2056,25 @@ def manifest_json():
 
 @app.post('/api/login')
 def login(req:LoginReq, request:Request):
+    _rc11_check_login_limit(request, req.username)
     with con() as c:
         admin = c.execute('SELECT * FROM admins WHERE username=? AND is_active=1', (req.username,)).fetchone()
         if not admin or not verify_password(req.password, admin['password_hash']):
+            _rc11_record_login_failure(request, req.username)
             ip = request.client.host if request.client else ''
             c.execute('INSERT INTO admin_logs(admin_id,username,action,detail,ip,created_at) VALUES(?,?,?,?,?,?)', (None, req.username, 'LOGIN_FAILED', '로그인 실패', ip, now()))
             c.commit()
             log_login_event(0, req.username, 0, '로그인 실패', request)
             raise HTTPException(401, '아이디 또는 비밀번호가 맞지 않습니다.')
+        _rc11_clear_login_failures(request, req.username)
+        # 구형 또는 평문 해시는 로그인 성공 시 자동으로 RC11 방식으로 올립니다.
+        if password_needs_rehash(admin['password_hash']):
+            c.execute('UPDATE admins SET password_hash=? WHERE id=?', (hash_password(req.password), admin['id']))
+        # 만료 세션과 오래된 중복 세션을 정리합니다.
+        c.execute("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now','localtime')")
+        old_sessions = c.execute('SELECT token FROM sessions WHERE admin_id=? ORDER BY created_at DESC', (admin['id'],)).fetchall()
+        for old in old_sessions[4:]:
+            c.execute('DELETE FROM sessions WHERE token=?', (old['token'],))
         timeout_minutes = 600
         row_timeout = c.execute('SELECT value FROM settings WHERE key=?', ('session_timeout_minutes',)).fetchone()
         if row_timeout:
@@ -2064,7 +2147,7 @@ def admins(authorization: str|None = Header(default=None)):
 def create_admin(req:AdminReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     require_super_admin(admin)
-    if len(req.password)<4: raise HTTPException(400,'비밀번호는 4자리 이상입니다.')
+    validate_password_strength(req.password)
     try:
         with con() as c:
             cur = c.execute('INSERT INTO admins(username,name,password_hash,is_active,created_at,updated_at,role,memo) VALUES(?,?,?,?,?,?,?,?)', (req.username.strip(),req.name.strip(),hash_password(req.password),1,now(),now(),req.role.strip() or '전체권한',req.memo.strip()))
@@ -2140,7 +2223,7 @@ def update_admin(admin_id:int, req:AdminUpdateReq, request:Request, authorizatio
             fields.append('is_active=?'); vals.append(1 if int(req.is_active) else 0)
 
     if req.password:
-        if len(req.password) < 4: raise HTTPException(400,'비밀번호는 4자리 이상입니다.')
+        validate_password_strength(req.password)
         fields.append('password_hash=?'); vals.append(hash_password(req.password))
 
     if not fields: return {'ok':True, 'changed':0}
@@ -7731,3 +7814,14 @@ def rc9_engine_audit(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     from .ai_engine_v7 import rc9_audit
     return rc9_audit()
+
+
+# ===================== RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================
+try:
+    from .analysis_engine_rc11 import build_member_friendly_analysis as _rc11_build_analysis
+
+    def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
+        return _rc11_build_analysis(round_no, st, mode, fixed, excluded, details or [])
+except Exception as _rc11_analysis_import_error:
+    print('[BBLOTTO] RC11 analysis engine load failed:', repr(_rc11_analysis_import_error))
+# ===================== /RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================
