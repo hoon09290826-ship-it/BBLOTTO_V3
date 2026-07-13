@@ -1361,7 +1361,7 @@ class MemberStatusReq(BaseModel): status:str; memo:str|None=None
 class MemberMemoReq(BaseModel): memo:str=''
 class MemberNoteReq(BaseModel): note:str; note_type:str='상담'
 class MemberBulkStatusReq(BaseModel): member_ids:list[int]; status:str
-class GenerateReq(BaseModel): member_id:int|None=None; round_no:int=1231; count:int=10; mode:str='balanced'; fixed:str=''; excluded:str=''; exclude:str='' # exclude는 기존 프론트 호환용
+class GenerateReq(BaseModel): member_id:int|None=None; round_no:int=1232; count:int=10; mode:str='balanced'; fixed:str=''; excluded:str=''; exclude:str='' # exclude는 기존 프론트 호환용
 class SaveRecommendationReq(BaseModel): member_id:int|None=None; member_name:str=''; round_no:int; mode:str='balanced'; combos:list[list[int]]=[]; analysis:str=''; sms:str=''; details:list[dict]=[]; engine:dict={}
 class SmsReq(BaseModel): member_id:int|None=None; member_name:str=''; phone:str=''; round_no:int; body:str; combos:list[list[int]]=[]; send_now:bool=False
 class WinReq(BaseModel): round_no:int; win_numbers:list[int]=[]; bonus:int=0; combos:list[list[int]]=[]; member_id:int|None=None; member_name:str=''
@@ -7531,7 +7531,7 @@ try:
     from .ai_engine_v7 import make_premium_combos as make_premium_combos
     from .ai_engine_v7 import latest_stats as latest_stats
     from .ai_engine_v7 import get_analysis_cache as _ai_v6_get_analysis_cache
-    BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_AI_V6_DB_FULL_HISTORY_CACHE'
+    BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_RC10_AUTO_FULL_HISTORY'
 
     @app.get('/api/ai-engine/v6-cache')
     def ai_engine_v6_cache(authorization: str|None = Header(default=None), force: int = 0, target_round: int|None = None):

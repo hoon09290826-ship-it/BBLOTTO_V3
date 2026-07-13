@@ -23,10 +23,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 BASE = Path(__file__).resolve().parents[1]
 DB_PATH = BASE / "database" / "bblotto_v34.db"
 ALT_DB_PATH = BASE / "database" / "lotto.db"
-ENGINE_VERSION = "BBLOTTO_RC9_AI_V7_STATISTICAL_ANALYSIS"
+ENGINE_VERSION = "BBLOTTO_RC10_AI_V7_AUTO_FULL_HISTORY"
 CACHE_KEY = "rc9_v7_full_history_statistical"
 MIN_REQUIRED_ROUND = 1
-DEFAULT_TARGET_ROUND = 1231  # DB가 완전히 비어 있을 때만 사용하는 안전 폴백
+DEFAULT_TARGET_ROUND = 1232  # DB가 완전히 비어 있을 때만 사용하는 안전 폴백
 
 def _completed_round_kst(now: Optional[datetime.datetime] = None) -> int:
     """한국시간 기준으로 추첨이 완료된 최신 회차를 계산한다.
@@ -352,8 +352,40 @@ def _cache_valid(cache: Dict[str, Any], draws: Sequence[Dict[str, Any]], target_
     )
 
 
+_AUTO_SYNC_LAST_CHECK = 0.0
+_AUTO_SYNC_INTERVAL_SECONDS = 600
+
+def _auto_sync_latest_if_needed(draws: Sequence[Dict[str, Any]], target_round: Optional[int] = None) -> List[Dict[str, Any]]:
+    """추천번호/통계 조회 시 최신 완료 회차가 빠졌으면 자동으로 보강합니다.
+
+    네트워크 요청은 프로세스당 10분에 한 번으로 제한하여 Railway 부하를 줄입니다.
+    저장에 성공하면 이후 캐시 재생성, 추천번호, 통계가 모두 같은 전체 이력을 사용합니다.
+    """
+    global _AUTO_SYNC_LAST_CHECK
+    latest = max((int(d.get("r") or 0) for d in draws), default=0)
+    target = _resolve_target_round(target_round, latest)
+    if latest >= target:
+        return list(draws)
+    now_ts = time.time()
+    if now_ts - _AUTO_SYNC_LAST_CHECK < _AUTO_SYNC_INTERVAL_SECONDS:
+        return list(draws)
+    _AUTO_SYNC_LAST_CHECK = now_ts
+    # 최신 몇 회차만 확인합니다. 오래된 누락분은 관리자 전체 동기화 기능이 담당합니다.
+    start = max(1, latest + 1)
+    for round_no in range(start, target + 1):
+        try:
+            fetched = _official_fetch(round_no)
+            if fetched:
+                _save_draw(fetched)
+        except Exception as exc:
+            print(f"[BBLOTTO] automatic latest draw sync failed for {round_no}: {exc!r}")
+            break
+    return _load_draws()
+
 def get_analysis_cache(force: bool = False, target_round: Optional[int] = None) -> Dict[str, Any]:
     draws = _load_draws()
+    # 추천번호 생성과 통계 조회 모두 이 함수를 통과하므로 새 회차를 자동 반영합니다.
+    draws = _auto_sync_latest_if_needed(draws, target_round)
     if force:
         return _build_cache(target_round)
     cache = _read_cache_from_db()
