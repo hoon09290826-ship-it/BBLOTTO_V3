@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css?v=rc7-27-no-smsganda-panel">
 </head>
 <body class="dashboardBody"><div id="toast"></div>
-<div id="app" class="app"><aside><div class="brand">BBLOTTO<br><span>PRO V50</span><small>RC9 · AI V7 ANALYSIS</small></div><button class="nav active" data-tab="dashboard">대시보드</button><button class="nav" data-tab="generator">추천번호 생성</button><button class="nav" data-tab="members">회원 관리</button><button class="nav" data-tab="winning">당첨 확인</button><button class="nav" data-tab="stats">통계</button><button class="nav" data-tab="account">내 계정</button><button class="nav" data-tab="admin">관리자</button><button id="logout" class="logout">로그아웃</button></aside>
+<div id="app" class="app"><aside><div class="brand">BBLOTTO<br><span>PRO V50</span><small>RC9.1 · DASHBOARD CLEAN</small></div><button class="nav active" data-tab="dashboard">대시보드</button><button class="nav" data-tab="generator">추천번호 생성</button><button class="nav" data-tab="members">회원 관리</button><button class="nav" data-tab="winning">당첨 확인</button><button class="nav" data-tab="stats">통계</button><button class="nav" data-tab="account">내 계정</button><button class="nav" data-tab="admin">관리자</button><button id="logout" class="logout">로그아웃</button></aside>
 <main><header><div><p class="eyebrow">BBLOTTO ADMIN SYSTEM</p><h2 id="pageTitle">대시보드</h2></div><div class="user">관리자: <b id="who">admin</b></div></header>
 <section id="dashboard" class="panel active">
   <div class="rc44-hero">
@@ -30,15 +30,6 @@
     <div class="stat"><b id="rc44TodayLogin">0</b><span>오늘 관리자 접속</span></div>
   </div>
   <div id="rc44Alerts" class="rc44-alerts hint"></div>
-  <div class="box rc44-simple-guide">
-    <h3>운영 메뉴</h3>
-    <p class="hint">대시보드는 핵심 현황만 표시합니다. 회원별 상세 관리는 왼쪽 메뉴의 회원 관리에서 진행하세요.</p>
-    <div class="btnrow wrap">
-      <button type="button" onclick="switchTab('members')">회원 관리로 이동</button>
-      <button type="button" onclick="switchTab('stats')">통계 확인</button>
-      <button type="button" onclick="switchTab('generator')">추천번호 생성</button>
-    </div>
-  </div>
   <div id="rc44AutoResult" class="box rc44-auto-result hint" style="display:none"></div>
 </section>
 <section id="generator" class="panel"><div class="generator-grid"><div class="box option-box"><h3>추천번호 생성</h3><label>회원</label><select id="genMember"></select><label>조합 수</label><select id="genCount"><option>5</option><option selected>10</option><option>13</option><option>15</option><option>20</option><option>30</option></select><label>분석 모드</label><select id="genMode"><option value="balanced">균형형</option><option value="conservative">보수형</option><option value="aggressive">공격형</option></select><label>고정수</label><input id="fixed" placeholder="예: 3, 8"><label>제외수</label><input id="exclude" placeholder="예: 1, 2"><button id="generate" class="primary bigbtn">추천번호 생성</button><p class="hint">추천번호 생성은 미리보기만 합니다. 추천번호 저장 또는 보낸문자 저장을 눌러야 당첨확인 대상에 등록됩니다.</p><div id="memberMessagePanel" class="generator-sms inline-message left-message"><div class="sms-grid"><div><h3>회원 안내 문구</h3><p class="hint">추천번호 생성 후 문구와 미리보기가 자동 갱신됩니다.<br>변수: {회원명}, {회차}, {추천번호}, {분석}, {발송일}, {AI점수}</p><textarea id="template" placeholder="비워두면 AI 기본 안내문이 자동 생성됩니다."></textarea><div class="btnrow"><button id="autoTemplate">AI 생성</button><button id="resetTemplate">복원</button><button id="clearTemplate">초기화</button><button id="saveTemplate" class="primary">문구 저장</button></div></div><div><h3>회원 안내 문구 미리보기</h3><textarea id="smsPreview" readonly></textarea><div class="btnrow"><button id="copySms">문구 복사</button><button id="saveRecommendationOnly">추천번호 저장</button><button id="copyAndSaveSmsLog" class="primary">복사+보낸문자 저장</button><button id="saveSmsLog">보낸문자 저장</button></div></div></div></div></div>
